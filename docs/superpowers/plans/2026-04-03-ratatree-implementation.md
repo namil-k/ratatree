@@ -1,4 +1,4 @@
-# rattunnel Implementation Plan
+# ratatree Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -2771,7 +2771,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use rattunnel::{FilePicker, FilePickerState, PickerResult};
+use ratatree::{FilePicker, FilePickerState, PickerResult};
 
 fn main() -> io::Result<()> {
     // Setup terminal
@@ -2862,7 +2862,7 @@ use std::path::PathBuf;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tempfile::TempDir;
 
-use rattunnel::{FilePickerState, PickerMode, PickerResult, ViewMode};
+use ratatree::{FilePickerState, PickerMode, PickerResult, ViewMode};
 
 fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
