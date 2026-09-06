@@ -124,7 +124,7 @@ let mut state = FilePickerState::builder()
 | Type | Filter entries in real time |
 | `Enter` | Accept filter, return to normal mode |
 | `Esc` | Clear filter, return to normal mode |
-| `j/k` / `Up/Down` | Navigate within results |
+| `Up/Down` / `Ctrl+N/P` / `Ctrl+J/K` | Navigate within results |
 
 ## Theming
 

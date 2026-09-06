@@ -276,9 +276,9 @@ fn cancel_returns_cancelled() {
 }
 
 /// Test: symlink cycle detection on Unix.
-/// Creates a self-referential symlink pointing to the parent temp dir.
-/// Entering the symlink succeeds the first time (visited_dirs gets the canonical path).
-/// Entering the same symlink again from inside should be blocked with an error message.
+/// A symlink that resolves to the current directory (or an ancestor of it) is
+/// blocked with an error message, while a symlink to an unrelated directory
+/// is followed normally.
 #[cfg(unix)]
 #[test]
 fn symlink_cycle_detection() {
@@ -287,66 +287,48 @@ fn symlink_cycle_detection() {
     let tmp = TempDir::new().unwrap();
     let canonical_tmp = tmp.path().canonicalize().unwrap();
 
-    // Create a symlink inside tmp that points back to tmp (self-loop)
-    let self_link = tmp.path().join("self_link");
-    symlink(tmp.path(), &self_link).unwrap();
+    // self_link -> tmp (self-loop), other_link -> tmp/other (fine)
+    symlink(tmp.path(), tmp.path().join("self_link")).unwrap();
+    fs::create_dir(tmp.path().join("other")).unwrap();
+    symlink(tmp.path().join("other"), tmp.path().join("other_link")).unwrap();
 
     let mut state = FilePickerState::builder()
         .start_dir(tmp.path())
         .build();
 
-    // self_link should appear as a Symlink entry
-    let self_link_entry = state
-        .visible_entries()
-        .into_iter()
-        .find(|e| e.name == "self_link")
-        .expect("self_link should be visible");
-    assert_eq!(self_link_entry.kind, ratatree::EntryKind::Symlink);
+    let idx_of = |state: &FilePickerState, name: &str| {
+        state
+            .common
+            .entries
+            .iter()
+            .position(|e| e.name == name)
+            .unwrap_or_else(|| panic!("{name} should be listed"))
+    };
 
-    // Navigate to self_link
-    let link_idx = state
-        .common
-        .entries
-        .iter()
-        .position(|e| e.name == "self_link")
-        .expect("should find self_link in entries");
-    *state.view.cursor_mut() = link_idx;
-
-    // Enter self_link the first time using 'l' (enter_directory) - should succeed.
+    // self_link is listed as a symlink and entering it is blocked immediately.
     // Note: Enter/confirm does not enter symlinks; 'l'/Right arrow calls enter_directory directly.
+    *state.view.cursor_mut() = idx_of(&state, "self_link");
+    assert_eq!(state.current_entry().unwrap().kind, ratatree::EntryKind::Symlink);
     state.handle_event(key(KeyCode::Right));
 
-    // current_dir should now resolve to the same location as canonical_tmp.
-    // Use canonicalize on both sides to handle platform symlink differences (e.g., /var vs /private/var on macOS).
-    let actual_canonical = state.common.current_dir.canonicalize().unwrap_or_else(|_| state.common.current_dir.clone());
     assert_eq!(
-        actual_canonical,
+        state.common.error_message.as_deref(),
+        Some("Circular symlink"),
+        "entering a symlink to the current directory should be blocked"
+    );
+    assert_eq!(
+        state.common.current_dir.canonicalize().unwrap(),
         canonical_tmp,
-        "after entering self_link, resolved current_dir should equal canonical_tmp"
+        "current_dir should remain unchanged after circular symlink block"
     );
-    assert!(state.common.error_message.is_none(), "no error on first entry");
 
-    // Now try entering self_link again from inside (it appears again inside itself)
-    let link_idx_inside = state
-        .common
-        .entries
-        .iter()
-        .position(|e| e.name == "self_link")
-        .expect("self_link should still appear inside");
-    *state.view.cursor_mut() = link_idx_inside;
-
-    let dir_before_second_enter = state.common.current_dir.clone();
+    // other_link resolves to an unrelated directory and is followed.
+    *state.view.cursor_mut() = idx_of(&state, "other_link");
     state.handle_event(key(KeyCode::Right));
 
-    // Should be blocked - error_message set
-    assert!(
-        state.common.error_message.is_some(),
-        "expected error_message to be set for circular symlink"
-    );
-    // current_dir should not have changed
     assert_eq!(
-        state.common.current_dir,
-        dir_before_second_enter,
-        "current_dir should remain unchanged after circular symlink block"
+        state.common.current_dir.canonicalize().unwrap(),
+        canonical_tmp.join("other"),
+        "symlink to an unrelated directory should be followed"
     );
 }

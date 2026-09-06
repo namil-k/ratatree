@@ -37,7 +37,6 @@ pub fn fuzzy_score(name: &str, query: &str) -> Option<i32> {
 }
 
 /// Returns indices of entries whose names match the query, sorted by score (best first).
-#[allow(dead_code)]
 pub fn filter_by_query(names: &[&str], query: &str) -> Vec<usize> {
     let mut scored: Vec<(usize, i32)> = names
         .iter()

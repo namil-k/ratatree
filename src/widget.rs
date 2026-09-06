@@ -61,6 +61,7 @@ fn render_path_bar(area: Rect, buf: &mut Buffer, state: &FilePickerState) {
 }
 
 fn render_file_list(area: Rect, buf: &mut Buffer, state: &mut FilePickerState) {
+    state.common.list_area = area;
     let entries = state.visible_entries();
 
     if entries.is_empty() {
@@ -92,103 +93,36 @@ fn render_file_list(area: Rect, buf: &mut Buffer, state: &mut FilePickerState) {
 
     for (row, entry) in entries.iter().enumerate().skip(scroll_offset).take(visible_height) {
         let y = area.y + (row - scroll_offset) as u16;
-        if y >= area.y + area.height {
-            break;
-        }
-
         let is_cursor = row == cursor;
         let is_selected = selected_paths.contains(&entry.path);
 
-        // Prefix
-        let prefix = if is_selected { " * " } else { "   " };
-
-        // Name style based on kind
-        let name_style = match entry.kind {
+        let kind_style = match entry.kind {
             EntryKind::Directory => theme.directory,
             EntryKind::Symlink => theme.symlink,
             EntryKind::File => theme.normal,
         };
-
-        // Apply cursor or selected overlay
-        let effective_name_style = if is_cursor {
-            name_style.patch(theme.cursor)
-        } else if is_selected {
-            name_style.patch(theme.selected)
+        let (prefix, prefix_style, name_style) = if is_selected {
+            (" * ", theme.selected, kind_style.patch(theme.selected))
         } else {
-            name_style
+            ("   ", Style::default(), kind_style)
         };
-
-        let prefix_style = if is_cursor {
-            theme.cursor
-        } else if is_selected {
-            theme.selected
-        } else {
-            Style::default()
-        };
-
-        // Suffix
         let suffix = match entry.kind {
             EntryKind::Directory => "/",
             EntryKind::Symlink => " ->",
             EntryKind::File => "",
         };
 
-        // Render the line into buffer manually for correct styling
-        let x = area.x;
-        let width = area.width as usize;
+        // Line handles grapheme widths, so wide characters (CJK, emoji)
+        // take the cells they need instead of overlapping the next glyph.
+        let line = Line::from(vec![
+            Span::styled(prefix, prefix_style),
+            Span::styled(entry.name.as_str(), name_style),
+            Span::styled(suffix, name_style),
+        ]);
+        buf.set_line(area.x, y, &line, area.width);
 
-        let mut col = 0usize;
-
-        // Prefix
-        for ch in prefix.chars() {
-            if col >= width {
-                break;
-            }
-            let cell = buf.cell_mut((x + col as u16, y));
-            if let Some(cell) = cell {
-                cell.set_char(ch);
-                cell.set_style(prefix_style);
-            }
-            col += 1;
-        }
-
-        // Name
-        for ch in entry.name.chars() {
-            if col >= width {
-                break;
-            }
-            let cell = buf.cell_mut((x + col as u16, y));
-            if let Some(cell) = cell {
-                cell.set_char(ch);
-                cell.set_style(effective_name_style);
-            }
-            col += 1;
-        }
-
-        // Suffix
-        for ch in suffix.chars() {
-            if col >= width {
-                break;
-            }
-            let cell = buf.cell_mut((x + col as u16, y));
-            if let Some(cell) = cell {
-                cell.set_char(ch);
-                cell.set_style(effective_name_style);
-            }
-            col += 1;
-        }
-
-        // Fill remaining width with cursor background if at cursor position
         if is_cursor {
-            let bg = theme.cursor.bg.unwrap_or(ratatui::style::Color::Reset);
-            while col < width {
-                let cell = buf.cell_mut((x + col as u16, y));
-                if let Some(cell) = cell {
-                    cell.set_char(' ');
-                    cell.set_style(Style::default().bg(bg));
-                }
-                col += 1;
-            }
+            buf.set_style(Rect::new(area.x, y, area.width, 1), theme.cursor);
         }
     }
 }
@@ -263,6 +197,128 @@ mod tests {
             let widget = FilePicker::default().block(Block::default().borders(Borders::ALL));
             frame.render_stateful_widget(widget, frame.area(), &mut state);
         }).unwrap();
+    }
+
+    #[test]
+    fn renders_wide_characters_without_overlap() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("한글.txt"), b"").unwrap();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .build();
+
+        let backend = TestBackend::new(30, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| {
+            frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+        }).unwrap();
+
+        // Row 1 is the first list row. After the 3-column prefix each Hangul
+        // syllable occupies two cells: the glyph, then a blank continuation.
+        let buf = terminal.backend().buffer();
+        let symbols: Vec<&str> = (3..11).map(|x| buf[(x, 1)].symbol()).collect();
+        assert_eq!(symbols, ["한", " ", "글", " ", ".", "t", "x", "t"]);
+    }
+
+    fn click(column: u16, row: u16) -> crossterm::event::Event {
+        use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    fn make_dir_with_n_files(n: usize) -> TempDir {
+        let dir = TempDir::new().unwrap();
+        for i in 0..n {
+            fs::write(dir.path().join(format!("f{i:02}.txt")), b"").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn mouse_click_maps_to_rendered_row() {
+        let dir = make_dir_with_files(); // subdir, alpha.txt, beta.rs
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .build();
+
+        // Bordered widget at an offset: border on row 5, path bar on row 6,
+        // list rows start at row 7, columns 11..=38.
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| {
+            let widget = FilePicker::default().block(Block::default().borders(Borders::ALL));
+            frame.render_stateful_widget(widget, Rect::new(10, 5, 30, 8), &mut state);
+        }).unwrap();
+
+        state.handle_event(click(15, 8));
+        assert_eq!(state.view.cursor(), 1, "second list row");
+        state.handle_event(click(15, 7));
+        assert_eq!(state.view.cursor(), 0, "first list row");
+        state.handle_event(click(15, 6));
+        assert_eq!(state.view.cursor(), 0, "path bar click is ignored");
+        state.handle_event(click(15, 8));
+        state.handle_event(click(5, 8));
+        assert_eq!(state.view.cursor(), 1, "click left of the widget is ignored");
+        state.handle_event(click(15, 11));
+        assert_eq!(state.view.cursor(), 1, "click below the last entry is ignored");
+    }
+
+    #[test]
+    fn mouse_click_accounts_for_scroll_offset() {
+        let dir = make_dir_with_n_files(10);
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .build();
+        *state.view.cursor_mut() = 5;
+
+        // 5 rows: path bar, 3 list rows, status bar. Cursor 5 scrolls to entries 3..=5.
+        let backend = TestBackend::new(30, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| {
+            frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+        }).unwrap();
+        assert_eq!(state.view.scroll_offset(), 3);
+
+        state.handle_event(click(0, 1));
+        assert_eq!(state.view.cursor(), 3, "first visible row is entry 3");
+    }
+
+    #[test]
+    fn mouse_click_before_first_render_is_ignored() {
+        let dir = make_dir_with_files();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .build();
+        *state.view.cursor_mut() = 1;
+
+        state.handle_event(click(0, 2));
+
+        assert_eq!(state.view.cursor(), 1);
+    }
+
+    #[test]
+    fn half_page_uses_rendered_height() {
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        let dir = make_dir_with_n_files(30);
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .build();
+
+        // 14 rows: path bar + 12 list rows + status bar, so half a page is 6.
+        let backend = TestBackend::new(30, 14);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| {
+            frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+        }).unwrap();
+
+        state.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)));
+        assert_eq!(state.view.cursor(), 6);
+        state.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)));
+        assert_eq!(state.view.cursor(), 0);
     }
 
     #[test]

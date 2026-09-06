@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use ratatui::layout::Rect;
+
 use crate::entry::{read_entries, Entry, EntryKind};
 use crate::theme::FilePickerTheme;
 use crate::view::{ListViewState, TreeViewState, ViewState};
@@ -52,12 +54,14 @@ pub struct CommonState {
     pub mode: PickerMode,
     pub input_mode: InputMode,
     pub search_query: String,
-    pub visited_dirs: HashSet<PathBuf>,
     pub pending_key: Option<(char, Instant)>,
     pub error_message: Option<String>,
     pub result: PickerResult,
     pub filter: FilterFn,
     pub theme: FilePickerTheme,
+    /// Screen area of the entry list from the last render. Mouse clicks and
+    /// page movements are resolved against it. Zero-sized until first render.
+    pub list_area: Rect,
 }
 
 // Manual Debug because filter is not Debug.
@@ -162,24 +166,24 @@ impl FilePickerState {
         let kind = entry.kind.clone();
         let path = entry.path.clone();
 
-        match self.common.mode {
-            PickerMode::FilesOnly => {
-                if kind == EntryKind::Directory {
-                    return;
-                }
-            }
-            PickerMode::DirsOnly => {
-                if kind == EntryKind::File {
-                    return;
-                }
-            }
-            PickerMode::Both => {}
+        if !self.is_selectable(&kind) {
+            return;
         }
 
         if self.common.selected.contains(&path) {
             self.common.selected.remove(&path);
         } else {
             self.common.selected.insert(path);
+        }
+    }
+
+    /// Whether an entry of this kind may be picked under the current `PickerMode`.
+    /// Symlinks are always allowed because their target kind is not known here.
+    fn is_selectable(&self, kind: &EntryKind) -> bool {
+        match self.common.mode {
+            PickerMode::FilesOnly => *kind != EntryKind::Directory,
+            PickerMode::DirsOnly => *kind != EntryKind::File,
+            PickerMode::Both => true,
         }
     }
 
@@ -197,11 +201,11 @@ impl FilePickerState {
             Some(entry) if entry.kind == EntryKind::Directory => {
                 self.enter_directory();
             }
-            Some(entry) => {
+            Some(entry) if self.is_selectable(&entry.kind) => {
                 let path = entry.path.clone();
                 self.common.result = PickerResult::Selected(vec![path]);
             }
-            None => {}
+            _ => {}
         }
     }
 
@@ -217,41 +221,35 @@ impl FilePickerState {
             None => return,
         };
 
-        let is_dir;
-        let canonical;
-
-        match entry.kind {
-            EntryKind::Directory => {
-                canonical = match entry.path.canonicalize() {
-                    Ok(p) => p,
-                    Err(_) => return,
-                };
-                is_dir = true;
-            }
-            EntryKind::Symlink => {
-                canonical = match entry.path.canonicalize() {
-                    Ok(p) => p,
-                    Err(_) => return,
-                };
-                is_dir = canonical.is_dir();
-            }
-            EntryKind::File => return,
+        if entry.kind == EntryKind::File {
+            return;
         }
-
-        if !is_dir {
+        let is_symlink = entry.kind == EntryKind::Symlink;
+        let Ok(canonical) = entry.path.canonicalize() else {
+            return;
+        };
+        if !canonical.is_dir() {
             return;
         }
 
-        if self.common.visited_dirs.contains(&canonical) {
+        // A symlink that resolves to the current directory or one of its
+        // ancestors would only lead back to where we already are.
+        if is_symlink && self.canonical_current_dir().starts_with(&canonical) {
             self.common.error_message = Some("Circular symlink".to_string());
             return;
         }
 
-        self.common.visited_dirs.insert(canonical.clone());
         self.common.current_dir = canonical;
         *self.view.cursor_mut() = 0;
         *self.view.scroll_offset_mut() = 0;
         self.refresh_entries();
+    }
+
+    fn canonical_current_dir(&self) -> PathBuf {
+        self.common
+            .current_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.common.current_dir.clone())
     }
 
     pub fn go_parent(&mut self) {
@@ -300,6 +298,15 @@ impl FilePickerState {
         let count = self.visible_count();
         if count > 0 {
             *self.view.cursor_mut() = count - 1;
+        }
+    }
+
+    /// Number of entry rows shown by the last render, or a fallback before
+    /// the widget has been drawn.
+    pub fn page_height(&self) -> usize {
+        match self.common.list_area.height {
+            0 => 20,
+            h => h as usize,
         }
     }
 
@@ -407,9 +414,10 @@ impl FilePickerBuilder {
     }
 
     pub fn build(self) -> FilePickerState {
-        let current_dir = self
+        let start_dir = self
             .start_dir
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
+        let current_dir = resolve_start_dir(start_dir);
 
         let entries = read_entries(
             &current_dir,
@@ -431,15 +439,34 @@ impl FilePickerBuilder {
             mode: self.mode,
             input_mode: InputMode::Normal,
             search_query: String::new(),
-            visited_dirs: HashSet::new(),
             pending_key: None,
             error_message: None,
             result: PickerResult::Pending,
             filter: self.filter,
             theme: self.theme,
+            list_area: Rect::default(),
         };
 
         FilePickerState { common, view }
+    }
+}
+
+/// Expands a leading `~` to the home directory and resolves the result to an
+/// absolute path with symlinks removed. A path that does not exist is kept as
+/// is (after tilde expansion) so the picker can still show it in the path bar.
+fn resolve_start_dir(dir: PathBuf) -> PathBuf {
+    let expanded = expand_tilde(dir);
+    expanded.canonicalize().unwrap_or(expanded)
+}
+
+fn expand_tilde(dir: PathBuf) -> PathBuf {
+    let Some(home) = dirs::home_dir() else {
+        return dir;
+    };
+    match dir.strip_prefix("~") {
+        Ok(rest) if rest.as_os_str().is_empty() => home,
+        Ok(rest) => home.join(rest),
+        Err(_) => dir,
     }
 }
 
@@ -473,6 +500,33 @@ mod tests {
         assert_eq!(state.common.result, PickerResult::Pending);
         assert!(matches!(state.view, ViewState::List(_)));
         assert_eq!(state.common.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn builder_canonicalizes_relative_start_dir() {
+        let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let mut state = FilePickerState::builder().start_dir(".").build();
+
+        assert_eq!(state.common.current_dir, cwd);
+
+        // Going up from a resolved path lands in the real parent, not "".
+        state.go_parent();
+        assert_eq!(state.common.current_dir, cwd.parent().unwrap());
+        assert!(state.visible_count() > 0, "parent directory should list entries");
+    }
+
+    #[test]
+    fn builder_expands_tilde() {
+        let home = dirs::home_dir().unwrap().canonicalize().unwrap();
+
+        let state = FilePickerState::builder().start_dir("~").build();
+        assert_eq!(state.common.current_dir, home);
+
+        // "~/" prefix is expanded; a nonexistent target keeps the expanded path.
+        let state = FilePickerState::builder()
+            .start_dir("~/ratatree-nonexistent-dir")
+            .build();
+        assert_eq!(state.common.current_dir, home.join("ratatree-nonexistent-dir"));
     }
 
     #[test]
@@ -518,6 +572,20 @@ mod tests {
 
         state.toggle_select();
         assert!(state.common.selected.is_empty(), "should not select a directory in FilesOnly mode");
+    }
+
+    #[test]
+    fn dirs_only_confirm_on_file_does_nothing() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("file.txt"), b"").unwrap();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .mode(PickerMode::DirsOnly)
+            .build();
+
+        assert_eq!(state.current_entry().unwrap().kind, EntryKind::File);
+        state.confirm();
+        assert_eq!(state.result(), PickerResult::Pending);
     }
 
     #[test]
@@ -619,6 +687,32 @@ mod tests {
             }
             other => panic!("expected Selected, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn reenter_directory_after_go_parent() {
+        let dir = make_dir_with_files();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .build();
+
+        // subdir is first (dirs sort first)
+        state.enter_directory();
+        assert!(state.common.current_dir.ends_with("subdir"));
+
+        state.go_parent();
+        assert!(!state.common.current_dir.ends_with("subdir"));
+
+        // Entering the same directory a second time must work and must not
+        // be mistaken for a circular symlink.
+        state.enter_directory();
+        assert!(
+            state.common.current_dir.ends_with("subdir"),
+            "expected to re-enter subdir, got {:?} (error: {:?})",
+            state.common.current_dir,
+            state.common.error_message
+        );
+        assert_eq!(state.common.error_message, None);
     }
 
     #[test]

@@ -1,7 +1,10 @@
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::layout::Position;
 use std::time::{Duration, Instant};
 
-use crate::search::fuzzy_score;
+use crate::search::filter_by_query;
 use crate::state::{FilePickerState, InputMode, PickerResult};
 
 /// Main event dispatcher. Does nothing if the picker has already finished.
@@ -18,6 +21,13 @@ pub fn handle_event(state: &mut FilePickerState, event: Event) {
 }
 
 fn handle_key(state: &mut FilePickerState, key: KeyEvent) {
+    // Terminals that report key releases (Windows, kitty protocol) would
+    // otherwise trigger every binding twice.
+    if key.kind == KeyEventKind::Release {
+        return;
+    }
+    // An error stays visible until the user does something else.
+    state.common.error_message = None;
     match state.common.input_mode {
         InputMode::Normal => handle_normal_key(state, key),
         InputMode::Search => handle_search_key(state, key),
@@ -57,10 +67,10 @@ fn handle_normal_key(state: &mut FilePickerState, key: KeyEvent) {
             state.common.pending_key = Some(('g', Instant::now()));
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.move_half_page_down(20);
+            state.move_half_page_down(state.page_height());
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.move_half_page_up(20);
+            state.move_half_page_up(state.page_height());
         }
         KeyCode::Char(' ') => {
             state.toggle_select();
@@ -108,10 +118,21 @@ fn handle_search_key(state: &mut FilePickerState, key: KeyEvent) {
             state.common.search_query.pop();
             update_search_filter(state);
         }
-        KeyCode::Char('j') | KeyCode::Down => {
+        KeyCode::Down => {
             state.move_cursor_down();
         }
-        KeyCode::Char('k') | KeyCode::Up => {
+        KeyCode::Up => {
+            state.move_cursor_up();
+        }
+        // Plain j/k are query text here, so navigation uses Ctrl variants.
+        KeyCode::Char('n') | KeyCode::Char('j')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            state.move_cursor_down();
+        }
+        KeyCode::Char('p') | KeyCode::Char('k')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
             state.move_cursor_up();
         }
         KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -127,17 +148,8 @@ fn update_search_filter(state: &mut FilePickerState) {
     if query.is_empty() {
         state.common.filtered_indices = None;
     } else {
-        let mut scored: Vec<(usize, i32)> = state
-            .common
-            .entries
-            .iter()
-            .enumerate()
-            .filter_map(|(i, entry)| {
-                fuzzy_score(&entry.name, &query).map(|score| (i, score))
-            })
-            .collect();
-        scored.sort_by(|a, b| b.1.cmp(&a.1));
-        let indices: Vec<usize> = scored.into_iter().map(|(i, _)| i).collect();
+        let names: Vec<&str> = state.common.entries.iter().map(|e| e.name.as_str()).collect();
+        let indices = filter_by_query(&names, &query);
         state.common.filtered_indices = Some(indices);
     }
     *state.view.cursor_mut() = 0;
@@ -145,16 +157,24 @@ fn update_search_filter(state: &mut FilePickerState) {
 }
 
 fn handle_mouse(state: &mut FilePickerState, mouse: MouseEvent) {
+    if !matches!(
+        mouse.kind,
+        MouseEventKind::Down(MouseButton::Left) | MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+    ) {
+        return;
+    }
+    state.common.error_message = None;
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            // Offset by 2 rows for path bar at top
-            let row = mouse.row as usize;
-            if row >= 2 {
-                let entry_idx = row - 2;
-                let count = state.visible_count();
-                if entry_idx < count {
-                    *state.view.cursor_mut() = entry_idx;
-                }
+            // Map the click through the list area recorded by the last render,
+            // so borders, offsets and scrolling are all accounted for.
+            let area = state.common.list_area;
+            if !area.contains(Position::new(mouse.column, mouse.row)) {
+                return;
+            }
+            let entry_idx = state.view.scroll_offset() + (mouse.row - area.y) as usize;
+            if entry_idx < state.visible_count() {
+                *state.view.cursor_mut() = entry_idx;
             }
         }
         MouseEventKind::ScrollDown => {
@@ -328,6 +348,69 @@ mod tests {
         handle_event(&mut state, key(KeyCode::Enter));
         assert_eq!(state.common.input_mode, InputMode::Normal);
         assert_eq!(state.common.filtered_indices, filter_before);
+    }
+
+    fn ctrl_key(c: char) -> Event {
+        Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
+    }
+
+    #[test]
+    fn search_mode_accepts_j_and_k_as_text() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("package.json"), b"").unwrap();
+        fs::write(dir.path().join("other.txt"), b"").unwrap();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
+
+        handle_event(&mut state, key(KeyCode::Char('/')));
+        for c in "json".chars() {
+            handle_event(&mut state, key(KeyCode::Char(c)));
+        }
+
+        assert_eq!(state.common.search_query, "json");
+        assert_eq!(state.visible_count(), 1);
+        assert_eq!(state.current_entry().unwrap().name, "package.json");
+    }
+
+    #[test]
+    fn search_mode_ctrl_keys_navigate() {
+        let (_dir, mut state) = make_state();
+        handle_event(&mut state, key(KeyCode::Char('/')));
+
+        handle_event(&mut state, ctrl_key('n'));
+        assert_eq!(state.view.cursor(), 1);
+        handle_event(&mut state, ctrl_key('p'));
+        assert_eq!(state.view.cursor(), 0);
+        handle_event(&mut state, ctrl_key('j'));
+        assert_eq!(state.view.cursor(), 1);
+        handle_event(&mut state, ctrl_key('k'));
+        assert_eq!(state.view.cursor(), 0);
+        assert!(state.common.search_query.is_empty(), "ctrl keys must not enter the query");
+    }
+
+    #[test]
+    fn error_message_is_cleared_by_next_key() {
+        let (_dir, mut state) = make_state();
+        state.common.error_message = Some("Circular symlink".to_string());
+
+        handle_event(&mut state, key(KeyCode::Char('j')));
+
+        assert_eq!(state.common.error_message, None);
+    }
+
+    #[test]
+    fn key_release_events_are_ignored() {
+        use crossterm::event::{KeyEventKind, KeyEventState};
+        let (_dir, mut state) = make_state();
+        let release = Event::Key(KeyEvent {
+            code: KeyCode::Char('j'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
+        });
+
+        handle_event(&mut state, release);
+
+        assert_eq!(state.view.cursor(), 0, "a key release must not move the cursor");
     }
 
     #[test]
