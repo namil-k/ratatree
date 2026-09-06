@@ -24,7 +24,10 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 ratatree = { git = "https://github.com/namil-k/ratatree.git" }
+ratatui = "0.30"
 ```
+
+You do not need a `crossterm` entry. ratatree re-exports the version it was built against as `ratatree::crossterm`, so the events you hand to `handle_event` always match the type it expects.
 
 Three things to know:
 
@@ -33,6 +36,7 @@ Three things to know:
 3. **`PickerResult`** tells you what the user did (still browsing, picked files, or cancelled)
 
 ```rust
+use ratatree::crossterm::event::{self, Event};
 use ratatree::{FilePicker, FilePickerState, PickerMode, PickerResult};
 
 // Create the picker
@@ -47,7 +51,7 @@ loop {
         f.render_stateful_widget(FilePicker::default(), f.area(), &mut state);
     })?;
 
-    if let Event::Key(key) = crossterm::event::read()? {
+    if let Event::Key(key) = event::read()? {
         state.handle_event(Event::Key(key));
     }
 

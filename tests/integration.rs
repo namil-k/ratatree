@@ -1,5 +1,5 @@
 use std::fs;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatree::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tempfile::TempDir;
 use ratatree::{FilePickerState, PickerMode, PickerResult, ViewMode};
 

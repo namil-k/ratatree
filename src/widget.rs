@@ -244,8 +244,8 @@ mod tests {
         assert_eq!(symbols, ["한", " ", "글", " ", ".", "t", "x", "t"]);
     }
 
-    fn click(column: u16, row: u16) -> crossterm::event::Event {
-        use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    fn click(column: u16, row: u16) -> ratatui::crossterm::event::Event {
+        use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
         Event::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column,
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn half_page_uses_rendered_height() {
-        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
         let dir = make_dir_with_n_files(30);
         let mut state = FilePickerState::builder()
             .start_dir(dir.path())

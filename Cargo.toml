@@ -2,6 +2,7 @@
 name = "ratatree"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
 description = "A terminal file/directory picker widget for ratatui"
 license = "MIT"
 repository = "https://github.com/namil-k/ratatree"
@@ -13,9 +14,12 @@ categories = ["command-line-interface"]
 exclude = ["docs/", ".superpowers/"]
 
 [dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
-dirs = "5"
+# The crossterm feature is what re-exports `ratatui::crossterm`, which this
+# crate's public API is built on. Depending on crossterm directly would let an
+# application's crossterm version drift from ratatui's, making the `Event` type
+# in `handle_event` incompatible with the one the application constructs.
+ratatui = { version = "0.30", features = ["crossterm"] }
+dirs = "7"
 
 [dev-dependencies]
 tempfile = "3"

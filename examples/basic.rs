@@ -1,13 +1,15 @@
 use std::io;
 
-use crossterm::event::{self, Event};
-use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
+// crossterm comes from ratatree, so it is always the version this widget
+// expects and no separate crossterm dependency is needed.
+use ratatree::crossterm::event::{self, Event};
+use ratatree::crossterm::execute;
+use ratatree::crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use ratatree::{FilePicker, FilePickerState, PickerResult};
 
 fn main() -> io::Result<()> {

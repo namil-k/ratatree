@@ -500,7 +500,7 @@ impl FilePickerState {
 
     // --- Event handling ---
 
-    pub fn handle_event(&mut self, event: crossterm::event::Event) {
+    pub fn handle_event(&mut self, event: ratatui::crossterm::event::Event) {
         crate::event::handle_event(self, event);
     }
 }

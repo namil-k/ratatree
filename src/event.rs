@@ -1,4 +1,4 @@
-use crossterm::event::{
+use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::Position;
@@ -194,7 +194,7 @@ fn handle_mouse(state: &mut FilePickerState, mouse: MouseEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::fs;
     use tempfile::TempDir;
 
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn key_release_events_are_ignored() {
-        use crossterm::event::{KeyEventKind, KeyEventState};
+        use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
         let (_dir, mut state) = make_state();
         let release = Event::Key(KeyEvent {
             code: KeyCode::Char('j'),
