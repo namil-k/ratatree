@@ -1,15 +1,7 @@
-// Tree view rendering - implemented in Task 9
-
 use std::path::Path;
 
-use crate::entry::{read_entries, Entry, EntryKind};
 use super::TreeViewState;
-
-#[derive(Debug, Clone)]
-pub struct TreeEntry {
-    pub entry: Entry,
-    pub depth: usize,
-}
+use crate::entry::{read_entries, Entry, EntryKind};
 
 impl TreeViewState {
     pub fn toggle_expand(&mut self, path: &Path) {
@@ -22,13 +14,15 @@ impl TreeViewState {
         self.expanded.contains(path)
     }
 
-    /// Builds a flat list of tree entries by walking expanded directories.
+    /// Flattens `root` and every expanded directory below it into a single
+    /// list in display order, with each entry's `depth` set to its nesting
+    /// level. Symlinks are never expanded, which also rules out cycles.
     pub fn build_tree_entries(
         &self,
         root: &Path,
         show_hidden: bool,
         filter: Option<&dyn Fn(&Path) -> bool>,
-    ) -> Vec<TreeEntry> {
+    ) -> Vec<Entry> {
         let mut result = Vec::new();
         self.collect_entries(root, 0, show_hidden, filter, &mut result);
         result
@@ -40,14 +34,14 @@ impl TreeViewState {
         depth: usize,
         show_hidden: bool,
         filter: Option<&dyn Fn(&Path) -> bool>,
-        result: &mut Vec<TreeEntry>,
+        result: &mut Vec<Entry>,
     ) {
-        let entries = read_entries(dir, show_hidden, filter);
-        for entry in entries {
-            let is_dir = entry.kind == EntryKind::Directory;
+        for mut entry in read_entries(dir, show_hidden, filter) {
+            entry.depth = depth;
+            let expand = entry.kind == EntryKind::Directory && self.is_expanded(&entry.path);
             let path = entry.path.clone();
-            result.push(TreeEntry { entry, depth });
-            if is_dir && self.is_expanded(&path) {
+            result.push(entry);
+            if expand {
                 self.collect_entries(&path, depth + 1, show_hidden, filter, result);
             }
         }
@@ -95,7 +89,9 @@ mod tests {
         state.toggle_expand(&subdir);
         let tree = state.build_tree_entries(tmp.path(), false, None);
         assert_eq!(tree.len(), 3); // subdir, b.txt (inside), a.txt
-        let sub_entry = tree.iter().find(|e| e.entry.name == "b.txt").unwrap();
+        let sub_entry = tree.iter().find(|e| e.name == "b.txt").unwrap();
         assert_eq!(sub_entry.depth, 1);
+        let names: Vec<&str> = tree.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["subdir", "b.txt", "a.txt"], "children follow their parent");
     }
 }

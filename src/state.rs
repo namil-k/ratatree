@@ -142,13 +142,153 @@ impl FilePickerState {
     // --- Directory refresh ---
 
     pub fn refresh_entries(&mut self) {
-        self.common.entries = read_entries(
-            &self.common.current_dir.clone(),
-            self.common.show_hidden,
-            self.common.filter.as_deref(),
-        );
+        let dir = self.common.current_dir.clone();
+        let show_hidden = self.common.show_hidden;
+        let filter = self.common.filter.as_deref();
+        self.common.entries = match &self.view {
+            ViewState::List(_) => read_entries(&dir, show_hidden, filter),
+            ViewState::Tree(tree) => tree.build_tree_entries(&dir, show_hidden, filter),
+        };
         self.common.filtered_indices = None;
         self.clamp_cursor();
+    }
+
+    // --- Tree view ---
+
+    fn is_expanded(&self, path: &Path) -> bool {
+        match &self.view {
+            ViewState::Tree(tree) => tree.is_expanded(path),
+            ViewState::List(_) => false,
+        }
+    }
+
+    /// Tree view only: show the children of the directory under the cursor.
+    pub fn expand_current(&mut self) {
+        self.set_expanded_current(true);
+    }
+
+    /// Tree view only: hide the children of the directory under the cursor.
+    pub fn collapse_current(&mut self) {
+        self.set_expanded_current(false);
+    }
+
+    /// Tree view only: expand or collapse the directory under the cursor.
+    pub fn toggle_expand_current(&mut self) {
+        let Some(entry) = self.current_entry() else {
+            return;
+        };
+        let expanded = self.is_expanded(&entry.path);
+        self.set_expanded_current(!expanded);
+    }
+
+    fn set_expanded_current(&mut self, expanded: bool) {
+        let Some(entry) = self.current_entry() else {
+            return;
+        };
+        if entry.kind != EntryKind::Directory {
+            return;
+        }
+        let path = entry.path.clone();
+        let ViewState::Tree(tree) = &mut self.view else {
+            return;
+        };
+        if expanded {
+            tree.expanded.insert(path.clone());
+        } else {
+            tree.expanded.remove(&path);
+        }
+        self.refresh_entries();
+        self.move_cursor_to_path(&path);
+    }
+
+    /// Moves the cursor to the visible entry with this path.
+    /// Returns false (leaving the cursor alone) if it is not visible.
+    fn move_cursor_to_path(&mut self, path: &Path) -> bool {
+        let found = self.visible_entries().iter().position(|e| e.path == path);
+        match found {
+            Some(idx) => {
+                *self.view.cursor_mut() = idx;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn move_to_first_child(&mut self) {
+        let cursor = self.view.cursor();
+        let has_child = {
+            let entries = self.visible_entries();
+            match (entries.get(cursor), entries.get(cursor + 1)) {
+                (Some(cur), Some(next)) => next.depth == cur.depth + 1,
+                _ => false,
+            }
+        };
+        if has_child {
+            *self.view.cursor_mut() = cursor + 1;
+        }
+    }
+
+    fn move_to_parent_node(&mut self) {
+        let cursor = self.view.cursor();
+        let parent = {
+            let entries = self.visible_entries();
+            match entries.get(cursor).map(|e| e.depth) {
+                Some(depth) if depth > 0 => {
+                    entries[..cursor].iter().rposition(|e| e.depth == depth - 1)
+                }
+                _ => None,
+            }
+        };
+        if let Some(idx) = parent {
+            *self.view.cursor_mut() = idx;
+        }
+    }
+
+    /// Moves "into" the entry under the cursor.
+    /// List view: enters the directory. Tree view: expands a collapsed
+    /// directory, moves to the first child of an expanded one, and enters a
+    /// symlink as the new root because symlinks are never expanded in place.
+    pub fn descend(&mut self) {
+        if matches!(self.view, ViewState::List(_)) {
+            self.enter_directory();
+            return;
+        }
+        let Some(entry) = self.current_entry() else {
+            return;
+        };
+        let kind = entry.kind.clone();
+        let expanded = self.is_expanded(&entry.path);
+        match kind {
+            EntryKind::Directory if expanded => self.move_to_first_child(),
+            EntryKind::Directory => self.expand_current(),
+            EntryKind::Symlink => self.enter_directory(),
+            EntryKind::File => {}
+        }
+    }
+
+    /// Moves "out of" the entry under the cursor.
+    /// List view: goes to the parent directory. Tree view: collapses an
+    /// expanded directory, moves a nested entry to its parent node, and goes
+    /// to the parent directory from a top-level entry.
+    pub fn ascend(&mut self) {
+        if matches!(self.view, ViewState::List(_)) {
+            self.go_parent();
+            return;
+        }
+        let Some(entry) = self.current_entry() else {
+            self.go_parent();
+            return;
+        };
+        let kind = entry.kind.clone();
+        let depth = entry.depth;
+        let expanded = self.is_expanded(&entry.path);
+        if kind == EntryKind::Directory && expanded {
+            self.collapse_current();
+        } else if depth > 0 {
+            self.move_to_parent_node();
+        } else {
+            self.go_parent();
+        }
     }
 
     // --- Toggles ---
@@ -199,7 +339,11 @@ impl FilePickerState {
 
         match self.current_entry() {
             Some(entry) if entry.kind == EntryKind::Directory => {
-                self.enter_directory();
+                if matches!(self.view, ViewState::Tree(_)) {
+                    self.toggle_expand_current();
+                } else {
+                    self.enter_directory();
+                }
             }
             Some(entry) if self.is_selectable(&entry.kind) => {
                 let path = entry.path.clone();
@@ -329,8 +473,13 @@ impl FilePickerState {
     // --- View toggle ---
 
     pub fn toggle_view(&mut self) {
-        let old = self.view.clone();
-        self.view = old.toggle();
+        let keep = self.current_entry().map(|e| e.path.clone());
+        self.view = self.view.clone().toggle();
+        self.refresh_entries();
+        let kept = keep.map(|p| self.move_cursor_to_path(&p)).unwrap_or(false);
+        if !kept {
+            *self.view.cursor_mut() = 0;
+        }
     }
 
     // --- Cursor clamping ---
@@ -486,6 +635,171 @@ mod tests {
         fs::write(dir.path().join("beta.rs"), b"").unwrap();
         fs::create_dir(dir.path().join("subdir")).unwrap();
         dir
+    }
+
+    /// root/
+    ///   a_dir/
+    ///     nested/
+    ///       deep.txt
+    ///     inner.txt
+    ///   b_dir/
+    ///   top.txt
+    /// Root order: a_dir, b_dir, top.txt. Inside a_dir: nested, inner.txt.
+    fn make_tree_dir() -> (TempDir, PathBuf) {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap().join("root");
+        fs::create_dir_all(root.join("a_dir").join("nested")).unwrap();
+        fs::write(root.join("a_dir").join("nested").join("deep.txt"), b"").unwrap();
+        fs::write(root.join("a_dir").join("inner.txt"), b"").unwrap();
+        fs::create_dir(root.join("b_dir")).unwrap();
+        fs::write(root.join("top.txt"), b"").unwrap();
+        (tmp, root)
+    }
+
+    fn tree_state(root: &Path) -> FilePickerState {
+        FilePickerState::builder()
+            .start_dir(root)
+            .view(ViewMode::Tree)
+            .build()
+    }
+
+    fn names(state: &FilePickerState) -> Vec<String> {
+        state.visible_entries().iter().map(|e| e.name.clone()).collect()
+    }
+
+    #[test]
+    fn tree_toggle_expand_shows_and_hides_children() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = tree_state(&root);
+        assert_eq!(names(&state), ["a_dir", "b_dir", "top.txt"]);
+
+        state.toggle_expand_current();
+        assert_eq!(names(&state), ["a_dir", "nested", "inner.txt", "b_dir", "top.txt"]);
+        assert_eq!(state.visible_entries()[1].depth, 1);
+        assert_eq!(state.view.cursor(), 0, "cursor stays on the expanded directory");
+
+        state.toggle_expand_current();
+        assert_eq!(names(&state), ["a_dir", "b_dir", "top.txt"]);
+    }
+
+    #[test]
+    fn expand_is_noop_in_list_view() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = FilePickerState::builder().start_dir(&root).build();
+
+        state.toggle_expand_current();
+
+        assert_eq!(names(&state), ["a_dir", "b_dir", "top.txt"]);
+    }
+
+    #[test]
+    fn descend_expands_then_moves_into_children() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = tree_state(&root);
+
+        state.descend(); // expand a_dir
+        assert_eq!(state.visible_count(), 5);
+        assert_eq!(state.view.cursor(), 0);
+
+        state.descend(); // already expanded: first child
+        assert_eq!(state.current_entry().unwrap().name, "nested");
+
+        state.descend(); // expand nested
+        assert_eq!(state.visible_count(), 6);
+        state.descend(); // first child of nested
+        assert_eq!(state.current_entry().unwrap().name, "deep.txt");
+
+        state.descend(); // file: nothing happens
+        assert_eq!(state.current_entry().unwrap().name, "deep.txt");
+        assert_eq!(state.common.current_dir, root, "root is unchanged in tree view");
+    }
+
+    #[test]
+    fn ascend_collapses_then_moves_to_parent_then_leaves_root() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = tree_state(&root);
+        for _ in 0..4 {
+            state.descend();
+        }
+        assert_eq!(state.current_entry().unwrap().name, "deep.txt");
+
+        state.ascend(); // file at depth 2: go to parent node
+        assert_eq!(state.current_entry().unwrap().name, "nested");
+        state.ascend(); // expanded dir: collapse it
+        assert_eq!(state.current_entry().unwrap().name, "nested");
+        assert_eq!(state.visible_count(), 5);
+        state.ascend(); // collapsed dir at depth 1: go to parent node
+        assert_eq!(state.current_entry().unwrap().name, "a_dir");
+        state.ascend(); // expanded dir: collapse it
+        assert_eq!(state.visible_count(), 3);
+        state.ascend(); // collapsed dir at depth 0: leave root
+        assert_eq!(state.common.current_dir, root.parent().unwrap().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn descend_and_ascend_change_root_in_list_view() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = FilePickerState::builder().start_dir(&root).build();
+
+        state.descend();
+        assert!(state.common.current_dir.ends_with("a_dir"));
+        state.ascend();
+        assert_eq!(state.common.current_dir, root.canonicalize().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn descend_on_symlink_in_tree_view_follows_it() {
+        let (_tmp, root) = make_tree_dir();
+        std::os::unix::fs::symlink(root.join("b_dir"), root.join("link")).unwrap();
+        let mut state = tree_state(&root);
+        let idx = state.common.entries.iter().position(|e| e.name == "link").unwrap();
+        *state.view.cursor_mut() = idx;
+
+        state.descend();
+
+        assert!(state.common.current_dir.ends_with("b_dir"));
+    }
+
+    #[test]
+    fn confirm_toggles_directory_in_tree_view() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = tree_state(&root);
+
+        state.confirm();
+        assert_eq!(state.visible_count(), 5);
+        assert_eq!(state.result(), PickerResult::Pending);
+        assert_eq!(state.common.current_dir, root);
+
+        state.confirm();
+        assert_eq!(state.visible_count(), 3);
+    }
+
+    #[test]
+    fn toggle_view_keeps_cursor_on_same_entry() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = FilePickerState::builder().start_dir(&root).build();
+        *state.view.cursor_mut() = 2;
+
+        state.toggle_view();
+
+        assert!(matches!(state.view, ViewState::Tree(_)));
+        assert_eq!(state.current_entry().unwrap().name, "top.txt");
+    }
+
+    #[test]
+    fn toggle_view_falls_back_to_top_when_entry_disappears() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = tree_state(&root);
+        state.descend();
+        *state.view.cursor_mut() = 2;
+        assert_eq!(state.current_entry().unwrap().name, "inner.txt");
+
+        state.toggle_view();
+
+        assert!(matches!(state.view, ViewState::List(_)));
+        assert_eq!(names(&state), ["a_dir", "b_dir", "top.txt"]);
+        assert_eq!(state.view.cursor(), 0);
     }
 
     #[test]

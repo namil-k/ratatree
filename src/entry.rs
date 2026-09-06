@@ -14,6 +14,9 @@ pub struct Entry {
     pub path: PathBuf,
     pub kind: EntryKind,
     pub is_hidden: bool,
+    /// Nesting level below the picker's current directory. Always 0 in list
+    /// view; in tree view, children of an expanded directory are one deeper.
+    pub depth: usize,
 }
 
 impl Entry {
@@ -28,7 +31,7 @@ impl Entry {
         } else {
             EntryKind::File
         };
-        Some(Entry { name, path: path.to_path_buf(), kind, is_hidden })
+        Some(Entry { name, path: path.to_path_buf(), kind, is_hidden, depth: 0 })
     }
 }
 
@@ -73,6 +76,13 @@ mod tests {
         assert_eq!(entry.name, "hello.txt");
         assert_eq!(entry.kind, EntryKind::File);
         assert!(!entry.is_hidden);
+    }
+
+    #[test]
+    fn entry_from_path_has_depth_zero() {
+        let dir = TempDir::new().unwrap();
+        let entry = Entry::from_path(dir.path()).unwrap();
+        assert_eq!(entry.depth, 0);
     }
 
     #[test]

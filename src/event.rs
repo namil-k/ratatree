@@ -55,10 +55,10 @@ fn handle_normal_key(state: &mut FilePickerState, key: KeyEvent) {
             state.move_cursor_up();
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            state.enter_directory();
+            state.descend();
         }
         KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
-            state.go_parent();
+            state.ascend();
         }
         KeyCode::Char('G') => {
             state.move_to_bottom();
@@ -411,6 +411,26 @@ mod tests {
         handle_event(&mut state, release);
 
         assert_eq!(state.view.cursor(), 0, "a key release must not move the cursor");
+    }
+
+    #[test]
+    fn l_and_h_expand_and_collapse_in_tree_view() {
+        use crate::state::ViewMode;
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("sub").join("inner.txt"), b"").unwrap();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .view(ViewMode::Tree)
+            .build();
+        let root = state.common.current_dir.clone();
+
+        handle_event(&mut state, key(KeyCode::Char('l')));
+        assert_eq!(state.visible_count(), 2, "l expands the directory in place");
+        assert_eq!(state.common.current_dir, root, "root is unchanged");
+
+        handle_event(&mut state, key(KeyCode::Left));
+        assert_eq!(state.visible_count(), 1, "Left collapses it again");
     }
 
     #[test]

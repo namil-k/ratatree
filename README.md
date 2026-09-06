@@ -98,8 +98,8 @@ let mut state = FilePickerState::builder()
 |---|---|
 | `j` / `Down` | Move cursor down |
 | `k` / `Up` | Move cursor up |
-| `l` / `Right` | Enter directory |
-| `h` / `Left` / `Backspace` | Go to parent directory |
+| `l` / `Right` | Enter directory (tree view: expand it) |
+| `h` / `Left` / `Backspace` | Go to parent directory (tree view: collapse it) |
 | `gg` | Jump to top |
 | `G` | Jump to bottom |
 | `Ctrl+D` | Half page down |
@@ -110,7 +110,7 @@ let mut state = FilePickerState::builder()
 
 | Key | Action |
 |---|---|
-| `Enter` | Confirm selection (or enter directory) |
+| `Enter` | Confirm selection (or enter directory; tree view: expand/collapse it) |
 | `Space` | Toggle multi-select on current item |
 | `Esc` / `q` | Cancel |
 | `Tab` | Switch between List and Tree view |
@@ -125,6 +125,16 @@ let mut state = FilePickerState::builder()
 | `Enter` | Accept filter, return to normal mode |
 | `Esc` | Clear filter, return to normal mode |
 | `Up/Down` / `Ctrl+N/P` / `Ctrl+J/K` | Navigate within results |
+
+### Tree View
+
+Press `Tab` to switch to the tree view. Directories expand in place instead of replacing the listing, and the cursor keeps working on the flattened tree, so search, multi-select and mouse clicks behave the same as in list view.
+
+| Key | Action |
+|---|---|
+| `l` / `Right` | Expand the directory. If it is already expanded, move to its first child. Symlinks are entered instead |
+| `h` / `Left` / `Backspace` | Collapse the directory. Otherwise move to the parent node, or to the parent directory from the top level |
+| `Enter` | Expand or collapse a directory, or confirm a file |
 
 ## Theming
 

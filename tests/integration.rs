@@ -1,7 +1,7 @@
 use std::fs;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tempfile::TempDir;
-use ratatree::{FilePickerState, PickerMode, PickerResult};
+use ratatree::{FilePickerState, PickerMode, PickerResult, ViewMode};
 
 fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
@@ -273,6 +273,37 @@ fn cancel_returns_cancelled() {
     assert_eq!(state.result(), PickerResult::Pending);
     state.handle_event(key(KeyCode::Esc));
     assert_eq!(state.result(), PickerResult::Cancelled);
+}
+
+/// Test: in tree view, `l` expands src/ in place, `j` moves onto lib.rs and
+/// Enter picks it with its full nested path.
+#[test]
+fn tree_view_expand_and_select_nested_file() {
+    let tmp = setup_test_dir();
+    let mut state = FilePickerState::builder()
+        .start_dir(tmp.path())
+        .view(ViewMode::Tree)
+        .build();
+    let root = state.common.current_dir.clone();
+
+    state.handle_event(key_char('l'));
+
+    assert_eq!(state.common.current_dir, root, "expanding does not change the root");
+    let names: Vec<&str> = state.visible_entries().iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["src", "lib.rs", "main.rs", "tests", "Cargo.toml", "README.md"]);
+
+    state.handle_event(key_char('j'));
+    assert_eq!(state.current_entry().unwrap().name, "lib.rs");
+
+    state.handle_event(key(KeyCode::Enter));
+
+    match state.result() {
+        PickerResult::Selected(paths) => {
+            assert_eq!(paths.len(), 1);
+            assert!(paths[0].ends_with("src/lib.rs"), "expected src/lib.rs, got {:?}", paths[0]);
+        }
+        other => panic!("expected Selected, got {:?}", other),
+    }
 }
 
 /// Test: symlink cycle detection on Unix.

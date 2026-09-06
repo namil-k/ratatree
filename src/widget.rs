@@ -8,6 +8,10 @@ use crate::entry::EntryKind;
 use crate::state::{FilePickerState, InputMode};
 use crate::view::ViewState;
 
+/// Tree view markers shown in front of directory names.
+const EXPANDED_MARKER: &str = "\u{25be} "; // ▾
+const COLLAPSED_MARKER: &str = "\u{25b8} "; // ▸
+
 #[derive(Default)]
 pub struct FilePicker {
     block: Option<Block<'static>>,
@@ -90,6 +94,10 @@ fn render_file_list(area: Rect, buf: &mut Buffer, state: &mut FilePickerState) {
 
     let theme = &state.common.theme;
     let selected_paths = &state.common.selected;
+    let tree = match &state.view {
+        ViewState::Tree(tree) => Some(tree),
+        ViewState::List(_) => None,
+    };
 
     for (row, entry) in entries.iter().enumerate().skip(scroll_offset).take(visible_height) {
         let y = area.y + (row - scroll_offset) as u16;
@@ -112,10 +120,26 @@ fn render_file_list(area: Rect, buf: &mut Buffer, state: &mut FilePickerState) {
             EntryKind::File => "",
         };
 
+        // Tree view: indent by depth and mark directories as expanded or
+        // collapsed. Files get a blank marker so names line up per level.
+        let indent = "  ".repeat(entry.depth);
+        let marker = match tree {
+            Some(tree) if entry.kind == EntryKind::Directory => {
+                if tree.is_expanded(&entry.path) {
+                    EXPANDED_MARKER
+                } else {
+                    COLLAPSED_MARKER
+                }
+            }
+            Some(_) => "  ",
+            None => "",
+        };
+
         // Line handles grapheme widths, so wide characters (CJK, emoji)
         // take the cells they need instead of overlapping the next glyph.
         let line = Line::from(vec![
             Span::styled(prefix, prefix_style),
+            Span::styled(format!("{indent}{marker}"), name_style),
             Span::styled(entry.name.as_str(), name_style),
             Span::styled(suffix, name_style),
         ]);
@@ -319,6 +343,48 @@ mod tests {
         assert_eq!(state.view.cursor(), 6);
         state.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)));
         assert_eq!(state.view.cursor(), 0);
+    }
+
+    fn row_text(terminal: &Terminal<TestBackend>, y: u16) -> String {
+        let buf = terminal.backend().buffer();
+        (0..buf.area.width)
+            .map(|x| buf[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    #[test]
+    fn tree_view_renders_indent_and_markers() {
+        use crate::state::ViewMode;
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("a_dir").join("nested")).unwrap();
+        fs::write(dir.path().join("a_dir").join("inner.txt"), b"").unwrap();
+        fs::create_dir(dir.path().join("b_dir")).unwrap();
+        fs::write(dir.path().join("top.txt"), b"").unwrap();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .view(ViewMode::Tree)
+            .build();
+        state.expand_current(); // a_dir
+
+        let backend = TestBackend::new(40, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| {
+            frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+        }).unwrap();
+
+        let rows: Vec<String> = (1..6).map(|y| row_text(&terminal, y)).collect();
+        assert_eq!(
+            rows,
+            [
+                "   ▾ a_dir/",
+                "     ▸ nested/",
+                "       inner.txt",
+                "   ▸ b_dir/",
+                "     top.txt",
+            ]
+        );
     }
 
     #[test]
