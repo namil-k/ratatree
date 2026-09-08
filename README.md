@@ -6,16 +6,17 @@ Drop it into any ratatui app. Your users get a full-featured file browser with k
 
 ```
 ┌─────────────────────────────────────────┐
-│ ~/projects/ratatree/src                │
-│─────────────────────────────────────────│
-│   📁 view/                              │
-│ ▸ 📄 lib.rs                             │
-│   ✓ 📄 state.rs                         │
-│   🔗 config -> ../config                │
-│─────────────────────────────────────────│
-│ 1 selected | . hidden | / search        │
+│/home/you/projects/ratatree              │
+│   src/                                  │
+│   tests/                                │
+│ * Cargo.toml                            │
+│   config ->                             │
+│                                         │
+│1 selected | hidden: off | view: list    │
 └─────────────────────────────────────────┘
 ```
+
+The cursor row is drawn with the cursor style (a background highlight), not a marker character. Multi-selected rows are prefixed with `*`, directories get a trailing `/`, and symlinks a trailing `->`. The example above is drawn inside a `Block` you supply with `FilePicker::default().block(...)`; without one the widget uses the whole area and draws no border.
 
 ## Quick Start
 
@@ -23,7 +24,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ratatree = { git = "https://github.com/namil-k/ratatree.git" }
+ratatree = "0.2"
 ratatui = "0.30"
 ```
 
@@ -132,6 +133,22 @@ let mut state = FilePickerState::builder()
 
 ### Tree View
 
+```
+┌─────────────────────────────────────────┐
+│/home/you/projects/ratatree              │
+│   ▾ src/                                │
+│     ▾ view/                             │
+│         list.rs                         │
+│         mod.rs                          │
+│       entry.rs                          │
+│       state.rs                          │
+│   ▸ tests/                              │
+│     Cargo.toml                          │
+│     config ->                           │
+│0 selected | hidden: off | view: tree    │
+└─────────────────────────────────────────┘
+```
+
 Press `Tab` to switch to the tree view. Directories expand in place instead of replacing the listing, and the cursor keeps working on the flattened tree, so search, multi-select and mouse clicks behave the same as in list view.
 
 | Key | Action |
@@ -218,6 +235,10 @@ impl App {
 ```bash
 cargo run --example basic
 ```
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
