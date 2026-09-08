@@ -43,7 +43,7 @@ pub fn filter_by_query(names: &[&str], query: &str) -> Vec<usize> {
         .enumerate()
         .filter_map(|(i, name)| fuzzy_score(name, query).map(|s| (i, s)))
         .collect();
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|a| std::cmp::Reverse(a.1));
     scored.into_iter().map(|(i, _)| i).collect()
 }
 

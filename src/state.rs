@@ -957,12 +957,12 @@ mod tests {
 
     #[test]
     fn builder_expands_tilde() {
-        let home = dirs::home_dir().unwrap().canonicalize().unwrap();
+        let home = dirs::home_dir().unwrap();
 
         let state = FilePickerState::builder().start_dir("~").build();
-        assert_eq!(state.common.current_dir, home);
+        assert_eq!(state.common.current_dir, home.canonicalize().unwrap());
 
-        // "~/" prefix is expanded; a nonexistent target keeps the expanded path.
+        // "~/" prefix is expanded; a nonexistent target keeps the expanded path. Compared against the uncanonicalized home on purpose: canonicalizing is what adds Windows' `\\?\` verbatim prefix, and a path that does not exist never reaches that step.
         let state = FilePickerState::builder()
             .start_dir("~/ratatree-nonexistent-dir")
             .build();
