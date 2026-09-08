@@ -42,7 +42,13 @@ impl TreeViewState {
         filter: Option<&dyn Fn(&Path) -> bool>,
         result: &mut Vec<Entry>,
     ) {
-        for mut entry in read_entries(dir, show_hidden, filter) {
+        // A subdirectory we cannot read is skipped rather than aborting the whole
+        // tree; a large tree often contains a few of them and erroring on each
+        // would drown out the listing.
+        let Ok(entries) = read_entries(dir, show_hidden, filter) else {
+            return;
+        };
+        for mut entry in entries {
             entry.depth = depth;
             let expand = entry.kind == EntryKind::Directory && self.is_expanded(&entry.path);
             let path = entry.path.clone();
@@ -56,6 +62,34 @@ impl TreeViewState {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_subdirectory_is_skipped_without_losing_its_siblings() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let locked = root.join("a_locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::create_dir(root.join("b_open")).unwrap();
+        std::fs::write(root.join("b_open/child.txt"), b"").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        if std::fs::read_dir(&locked).is_ok() {
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let mut tree = TreeViewState::new();
+        tree.toggle_expand(&locked);
+        tree.toggle_expand(&root.join("b_open"));
+        let entries = tree.build_tree_entries(root, false, None);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["a_locked", "b_open", "child.txt"]);
+    }
+
     use super::*;
     use std::fs;
     use std::path::PathBuf;

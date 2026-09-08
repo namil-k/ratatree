@@ -89,7 +89,7 @@ pub struct CommonState {
     pub search_query: String,
     /// First half of a pending two-key sequence such as `gg`, with the time it was pressed so a stale prefix expires instead of arming forever.
     pub pending_key: Option<(char, Instant)>,
-    /// A message shown in place of the status bar, such as `Circular symlink`. Cleared on the next handled event.
+    /// A message shown in place of the status bar, such as `Circular symlink` or `Cannot read directory: permission denied`. Cleared on the next handled event.
     pub error_message: Option<String>,
     /// What the user has done so far.
     pub result: PickerResult,
@@ -211,7 +211,13 @@ impl FilePickerState {
         let show_hidden = self.common.show_hidden;
         let filter = self.common.filter.as_deref();
         self.common.entries = match &self.view {
-            ViewState::List(_) => read_entries(&dir, show_hidden, filter),
+            ViewState::List(_) => match read_entries(&dir, show_hidden, filter) {
+                Ok(entries) => entries,
+                Err(err) => {
+                    self.common.error_message = Some(read_failure_message(&err));
+                    Vec::new()
+                }
+            },
             ViewState::Tree(tree) => tree.build_tree_entries(&dir, show_hidden, filter),
         };
         self.common.filtered_indices = None;
@@ -677,7 +683,11 @@ impl FilePickerBuilder {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
         let current_dir = resolve_start_dir(start_dir);
 
-        let entries = read_entries(&current_dir, self.show_hidden, self.filter.as_deref());
+        let (entries, error_message) =
+            match read_entries(&current_dir, self.show_hidden, self.filter.as_deref()) {
+                Ok(entries) => (entries, None),
+                Err(err) => (Vec::new(), Some(read_failure_message(&err))),
+            };
 
         let view = match self.view_mode {
             ViewMode::List => ViewState::List(ListViewState::new()),
@@ -694,7 +704,7 @@ impl FilePickerBuilder {
             input_mode: InputMode::Normal,
             search_query: String::new(),
             pending_key: None,
-            error_message: None,
+            error_message,
             result: PickerResult::Pending,
             filter: self.filter,
             theme: self.theme,
@@ -706,6 +716,11 @@ impl FilePickerBuilder {
 }
 
 /// Expands a leading `~` to the home directory and resolves the result to an absolute path with symlinks removed. A path that does not exist is kept as is, after tilde expansion, so the picker can still show it in the path bar.
+/// Turns a failed directory read into something short enough for the status bar.
+fn read_failure_message(err: &std::io::Error) -> String {
+    format!("Cannot read directory: {}", err.kind())
+}
+
 fn resolve_start_dir(dir: PathBuf) -> PathBuf {
     let expanded = expand_tilde(dir);
     expanded.canonicalize().unwrap_or(expanded)
@@ -969,6 +984,20 @@ mod tests {
         assert_eq!(
             state.common.current_dir,
             home.join("ratatree-nonexistent-dir")
+        );
+    }
+
+    #[test]
+    fn unreadable_directory_reports_why_instead_of_looking_empty() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("no-such-directory");
+
+        let state = FilePickerState::builder().start_dir(&missing).build();
+
+        assert!(state.common.entries.is_empty());
+        assert!(
+            state.common.error_message.is_some(),
+            "an unreadable directory must say why, not just render as empty"
         );
     }
 

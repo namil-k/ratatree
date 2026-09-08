@@ -60,15 +60,15 @@ impl Entry {
 ///
 /// `filter` is applied to files and symlinks only. Directories always pass, because hiding them would make their contents unreachable in a picker that navigates by entering them.
 ///
-/// Directories sort before everything else, then names sort case-insensitively. An unreadable directory yields an empty list rather than an error, so a permission problem shows up as an empty pane instead of breaking the render.
+/// Directories sort before everything else, then names sort case-insensitively.
+///
+/// Returns the error from [`fs::read_dir`] when the directory cannot be listed at all, so the caller can tell a genuinely empty directory apart from one it is not allowed to read. Entries that fail to stat individually are skipped without failing the whole listing.
 pub fn read_entries(
     dir: &Path,
     show_hidden: bool,
     filter: Option<&dyn Fn(&Path) -> bool>,
-) -> Vec<Entry> {
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
+) -> std::io::Result<Vec<Entry>> {
+    let read_dir = fs::read_dir(dir)?;
     let mut entries: Vec<Entry> = read_dir
         .filter_map(|e| e.ok())
         .filter_map(|e| Entry::from_path(&e.path()))
@@ -84,7 +84,7 @@ pub fn read_entries(
             matches!(b.kind, EntryKind::Directory).cmp(&matches!(a.kind, EntryKind::Directory));
         dir_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
-    entries
+    Ok(entries)
 }
 
 #[cfg(test)]
@@ -134,7 +134,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("visible.txt"), b"").unwrap();
         fs::write(dir.path().join(".hidden.txt"), b"").unwrap();
-        let entries = read_entries(dir.path(), false, None);
+        let entries = read_entries(dir.path(), false, None).unwrap();
         assert!(entries.iter().all(|e| !e.is_hidden));
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "visible.txt");
@@ -145,7 +145,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("visible.txt"), b"").unwrap();
         fs::write(dir.path().join(".hidden.txt"), b"").unwrap();
-        let entries = read_entries(dir.path(), true, None);
+        let entries = read_entries(dir.path(), true, None).unwrap();
         assert_eq!(entries.len(), 2);
     }
 
@@ -155,7 +155,7 @@ mod tests {
         fs::write(dir.path().join("aaa.txt"), b"").unwrap();
         fs::write(dir.path().join("zzz.txt"), b"").unwrap();
         fs::create_dir(dir.path().join("mmm")).unwrap();
-        let entries = read_entries(dir.path(), false, None);
+        let entries = read_entries(dir.path(), false, None).unwrap();
         assert_eq!(entries[0].name, "mmm");
         assert_eq!(entries[0].kind, EntryKind::Directory);
         assert_eq!(entries[1].name, "aaa.txt");
@@ -171,13 +171,41 @@ mod tests {
         // filter: only .txt files (but dirs always pass)
         let filter: &dyn Fn(&std::path::Path) -> bool =
             &|p| p.extension().and_then(|e| e.to_str()) == Some("txt");
-        let entries = read_entries(dir.path(), false, Some(filter));
+        let entries = read_entries(dir.path(), false, Some(filter)).unwrap();
         // directory always passes
         assert!(entries.iter().any(|e| e.name == "mydir"));
         // .txt passes
         assert!(entries.iter().any(|e| e.name == "notes.txt"));
         // .png filtered out
         assert!(!entries.iter().any(|e| e.name == "image.png"));
+    }
+
+    #[test]
+    fn missing_directory_is_an_error_not_an_empty_listing() {
+        let dir = TempDir::new().unwrap();
+        let result = read_entries(&dir.path().join("no-such-directory"), false, None);
+        assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_directory_is_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let locked = dir.path().join("locked");
+        fs::create_dir(&locked).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Root ignores the mode bits, so there is nothing to assert there.
+        if fs::read_dir(&locked).is_ok() {
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let result = read_entries(&locked, false, None);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err());
     }
 
     #[cfg(unix)]
@@ -188,7 +216,7 @@ mod tests {
         fs::write(&target, b"").unwrap();
         let link = dir.path().join("link.txt");
         std::os::unix::fs::symlink(&target, &link).unwrap();
-        let entries = read_entries(dir.path(), false, None);
+        let entries = read_entries(dir.path(), false, None).unwrap();
         let sym = entries.iter().find(|e| e.name == "link.txt").unwrap();
         assert_eq!(sym.kind, EntryKind::Symlink);
     }

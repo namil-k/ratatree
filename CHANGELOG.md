@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-09-08
+
+### Fixed
+
+- Fuzzy search ranked almost nothing. Every subsequence match scored `10 x query length`, so they all tied, and the `+ query length` added to the prefix and substring tiers was the same for every candidate. Names therefore came back in directory order rather than by how well they matched. Scores are now a tier plus a bonus that rewards a shorter name, an earlier match, a match starting at a word boundary, and matched letters sitting close together. The bonus is capped below the gap between tiers, so a name that literally contains the query always outranks one that merely has the letters in order.
+- A directory that could not be listed rendered as an empty pane with no explanation. `read_dir` failures now reach the status bar as `Cannot read directory: <reason>`. In tree view an unreadable subdirectory is skipped instead, leaving the rest of the tree intact, because a large tree often contains several and erroring on each would bury the listing.
+
+### Known limitations
+
+- The read failure message clears on the next keypress, like every other status message. Showing it for as long as the directory stays unreadable needs a new field on `CommonState`, whose fields are all public, so that waits for 0.3.0.
+
 ## [0.2.0] - 2026-09-08
 
 Tree view is now actually wired into the widget, nine navigation and rendering bugs are fixed, and the crate builds against ratatui 0.30.
@@ -57,5 +68,6 @@ Initial release.
 - `FilePicker` stateful widget with `FilePickerState` and a builder.
 - List and tree view modes, vim-style keybindings, fuzzy search, multi-select, hidden file toggle, symlink handling, a filter callback, and a fully customizable `FilePickerTheme`.
 
+[0.2.1]: https://github.com/namil-k/ratatree/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/namil-k/ratatree/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/namil-k/ratatree/releases/tag/v0.1.0

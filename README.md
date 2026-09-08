@@ -75,7 +75,7 @@ loop {
 
 - **List and Tree views** - toggle with `Tab`
 - **Vim keybindings** - `hjkl`, `gg`, `G`, `Ctrl+D/U` (arrow keys too)
-- **Fuzzy search** - press `/` and start typing
+- **Fuzzy search** - press `/` and start typing; results rank by how well they match, not by directory order
 - **Multi-select** - `Space` to toggle, `Enter` to confirm
 - **Hidden files** - toggle with `.`
 - **Symlink support** - follows symlinks with circular reference detection
