@@ -1,0 +1,6 @@
+# Bulk reformatting commits, skipped by `git blame`.
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply rustfmt across the crate
+72f53070faf76df57d2489fb71fe7a8f73633222
