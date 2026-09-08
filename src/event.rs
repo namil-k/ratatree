@@ -147,7 +147,12 @@ fn update_search_filter(state: &mut FilePickerState) {
     if query.is_empty() {
         state.common.filtered_indices = None;
     } else {
-        let names: Vec<&str> = state.common.entries.iter().map(|e| e.name.as_str()).collect();
+        let names: Vec<&str> = state
+            .common
+            .entries
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
         let indices = filter_by_query(&names, &query);
         state.common.filtered_indices = Some(indices);
     }
@@ -158,7 +163,9 @@ fn update_search_filter(state: &mut FilePickerState) {
 fn handle_mouse(state: &mut FilePickerState, mouse: MouseEvent) {
     if !matches!(
         mouse.kind,
-        MouseEventKind::Down(MouseButton::Left) | MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+        MouseEventKind::Down(MouseButton::Left)
+            | MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollUp
     ) {
         return;
     }
@@ -201,9 +208,7 @@ mod tests {
         fs::write(dir.path().join("alpha.txt"), b"").unwrap();
         fs::write(dir.path().join("beta.rs"), b"").unwrap();
         fs::create_dir(dir.path().join("subdir")).unwrap();
-        let state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let state = FilePickerState::builder().start_dir(dir.path()).build();
         (dir, state)
     }
 
@@ -276,9 +281,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("visible.txt"), b"").unwrap();
         fs::write(dir.path().join(".hidden.txt"), b"").unwrap();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
         assert_eq!(state.visible_count(), 1);
         handle_event(&mut state, key(KeyCode::Char('.')));
         assert_eq!(state.visible_count(), 2);
@@ -382,7 +385,10 @@ mod tests {
         assert_eq!(state.view.cursor(), 1);
         handle_event(&mut state, ctrl_key('k'));
         assert_eq!(state.view.cursor(), 0);
-        assert!(state.common.search_query.is_empty(), "ctrl keys must not enter the query");
+        assert!(
+            state.common.search_query.is_empty(),
+            "ctrl keys must not enter the query"
+        );
     }
 
     #[test]
@@ -408,7 +414,11 @@ mod tests {
 
         handle_event(&mut state, release);
 
-        assert_eq!(state.view.cursor(), 0, "a key release must not move the cursor");
+        assert_eq!(
+            state.view.cursor(),
+            0,
+            "a key release must not move the cursor"
+        );
     }
 
     #[test]

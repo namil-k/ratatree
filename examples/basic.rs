@@ -19,9 +19,7 @@ fn main() -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut state = FilePickerState::builder()
-        .start_dir(".")
-        .build();
+    let mut state = FilePickerState::builder().start_dir(".").build();
 
     loop {
         terminal.draw(|f| {

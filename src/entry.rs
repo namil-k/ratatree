@@ -46,7 +46,13 @@ impl Entry {
         } else {
             EntryKind::File
         };
-        Some(Entry { name, path: path.to_path_buf(), kind, is_hidden, depth: 0 })
+        Some(Entry {
+            name,
+            path: path.to_path_buf(),
+            kind,
+            is_hidden,
+            depth: 0,
+        })
     }
 }
 
@@ -74,8 +80,8 @@ pub fn read_entries(
         })
         .collect();
     entries.sort_by(|a, b| {
-        let dir_ord = matches!(b.kind, EntryKind::Directory)
-            .cmp(&matches!(a.kind, EntryKind::Directory));
+        let dir_ord =
+            matches!(b.kind, EntryKind::Directory).cmp(&matches!(a.kind, EntryKind::Directory));
         dir_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     entries

@@ -69,8 +69,8 @@ pub use ratatui::crossterm;
 
 pub use entry::{Entry, EntryKind};
 pub use state::{
-    CommonState, FilePickerBuilder, FilePickerState, FilterFn, InputMode, PickerMode,
-    PickerResult, ViewMode,
+    CommonState, FilePickerBuilder, FilePickerState, FilterFn, InputMode, PickerMode, PickerResult,
+    ViewMode,
 };
 pub use theme::FilePickerTheme;
 pub use view::ViewState;

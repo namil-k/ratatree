@@ -57,8 +57,8 @@ impl TreeViewState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     #[test]
@@ -98,6 +98,10 @@ mod tests {
         let sub_entry = tree.iter().find(|e| e.name == "b.txt").unwrap();
         assert_eq!(sub_entry.depth, 1);
         let names: Vec<&str> = tree.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["subdir", "b.txt", "a.txt"], "children follow their parent");
+        assert_eq!(
+            names,
+            ["subdir", "b.txt", "a.txt"],
+            "children follow their parent"
+        );
     }
 }

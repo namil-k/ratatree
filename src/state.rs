@@ -677,11 +677,7 @@ impl FilePickerBuilder {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
         let current_dir = resolve_start_dir(start_dir);
 
-        let entries = read_entries(
-            &current_dir,
-            self.show_hidden,
-            self.filter.as_deref(),
-        );
+        let entries = read_entries(&current_dir, self.show_hidden, self.filter.as_deref());
 
         let view = match self.view_mode {
             ViewMode::List => ViewState::List(ListViewState::new()),
@@ -771,7 +767,11 @@ mod tests {
     }
 
     fn names(state: &FilePickerState) -> Vec<String> {
-        state.visible_entries().iter().map(|e| e.name.clone()).collect()
+        state
+            .visible_entries()
+            .iter()
+            .map(|e| e.name.clone())
+            .collect()
     }
 
     #[test]
@@ -781,9 +781,16 @@ mod tests {
         assert_eq!(names(&state), ["a_dir", "b_dir", "top.txt"]);
 
         state.toggle_expand_current();
-        assert_eq!(names(&state), ["a_dir", "nested", "inner.txt", "b_dir", "top.txt"]);
+        assert_eq!(
+            names(&state),
+            ["a_dir", "nested", "inner.txt", "b_dir", "top.txt"]
+        );
         assert_eq!(state.visible_entries()[1].depth, 1);
-        assert_eq!(state.view.cursor(), 0, "cursor stays on the expanded directory");
+        assert_eq!(
+            state.view.cursor(),
+            0,
+            "cursor stays on the expanded directory"
+        );
 
         state.toggle_expand_current();
         assert_eq!(names(&state), ["a_dir", "b_dir", "top.txt"]);
@@ -818,7 +825,10 @@ mod tests {
 
         state.descend(); // file: nothing happens
         assert_eq!(state.current_entry().unwrap().name, "deep.txt");
-        assert_eq!(state.common.current_dir, root, "root is unchanged in tree view");
+        assert_eq!(
+            state.common.current_dir, root,
+            "root is unchanged in tree view"
+        );
     }
 
     #[test]
@@ -840,7 +850,10 @@ mod tests {
         state.ascend(); // expanded dir: collapse it
         assert_eq!(state.visible_count(), 3);
         state.ascend(); // collapsed dir at depth 0: leave root
-        assert_eq!(state.common.current_dir, root.parent().unwrap().canonicalize().unwrap());
+        assert_eq!(
+            state.common.current_dir,
+            root.parent().unwrap().canonicalize().unwrap()
+        );
     }
 
     #[test]
@@ -860,7 +873,12 @@ mod tests {
         let (_tmp, root) = make_tree_dir();
         std::os::unix::fs::symlink(root.join("b_dir"), root.join("link")).unwrap();
         let mut state = tree_state(&root);
-        let idx = state.common.entries.iter().position(|e| e.name == "link").unwrap();
+        let idx = state
+            .common
+            .entries
+            .iter()
+            .position(|e| e.name == "link")
+            .unwrap();
         *state.view.cursor_mut() = idx;
 
         state.descend();
@@ -912,9 +930,7 @@ mod tests {
     #[test]
     fn builder_defaults() {
         let dir = make_dir_with_files();
-        let state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let state = FilePickerState::builder().start_dir(dir.path()).build();
 
         assert_eq!(state.common.mode, PickerMode::Both);
         assert!(!state.common.show_hidden);
@@ -933,7 +949,10 @@ mod tests {
         // Going up from a resolved path lands in the real parent, not "".
         state.go_parent();
         assert_eq!(state.common.current_dir, cwd.parent().unwrap());
-        assert!(state.visible_count() > 0, "parent directory should list entries");
+        assert!(
+            state.visible_count() > 0,
+            "parent directory should list entries"
+        );
     }
 
     #[test]
@@ -947,7 +966,10 @@ mod tests {
         let state = FilePickerState::builder()
             .start_dir("~/ratatree-nonexistent-dir")
             .build();
-        assert_eq!(state.common.current_dir, home.join("ratatree-nonexistent-dir"));
+        assert_eq!(
+            state.common.current_dir,
+            home.join("ratatree-nonexistent-dir")
+        );
     }
 
     #[test]
@@ -970,9 +992,17 @@ mod tests {
             .build();
 
         // Only alpha.txt and subdir (dirs pass the filter always) should be present
-        let names: Vec<&str> = state.common.entries.iter().map(|e| e.name.as_str()).collect();
+        let names: Vec<&str> = state
+            .common
+            .entries
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
         assert!(names.contains(&"alpha.txt"), "alpha.txt should be included");
-        assert!(!names.contains(&"beta.rs"), "beta.rs should be filtered out");
+        assert!(
+            !names.contains(&"beta.rs"),
+            "beta.rs should be filtered out"
+        );
         assert!(names.contains(&"subdir"), "dirs always pass filter");
     }
 
@@ -992,7 +1022,10 @@ mod tests {
         assert_eq!(first_kind, Some(EntryKind::Directory));
 
         state.toggle_select();
-        assert!(state.common.selected.is_empty(), "should not select a directory in FilesOnly mode");
+        assert!(
+            state.common.selected.is_empty(),
+            "should not select a directory in FilesOnly mode"
+        );
     }
 
     #[test]
@@ -1015,9 +1048,7 @@ mod tests {
         fs::write(dir.path().join("visible.txt"), b"").unwrap();
         fs::write(dir.path().join(".hidden.txt"), b"").unwrap();
 
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         assert_eq!(state.visible_count(), 1);
 
@@ -1031,9 +1062,7 @@ mod tests {
     #[test]
     fn multi_select_toggle() {
         let dir = make_dir_with_files();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         // Find a file entry (not directory)
         let file_idx = state
@@ -1057,9 +1086,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("only_file.txt"), b"").unwrap();
 
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         // Cursor is at a file with empty selected set
         *state.view.cursor_mut() = 0;
@@ -1077,9 +1104,7 @@ mod tests {
     #[test]
     fn confirm_returns_selected_set() {
         let dir = make_dir_with_files();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         // Select two files
         let file_indices: Vec<usize> = state
@@ -1091,7 +1116,10 @@ mod tests {
             .map(|(i, _)| i)
             .collect();
 
-        assert!(file_indices.len() >= 2, "need at least 2 files for this test");
+        assert!(
+            file_indices.len() >= 2,
+            "need at least 2 files for this test"
+        );
 
         *state.view.cursor_mut() = file_indices[0];
         state.toggle_select();
@@ -1113,9 +1141,7 @@ mod tests {
     #[test]
     fn reenter_directory_after_go_parent() {
         let dir = make_dir_with_files();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         // subdir is first (dirs sort first)
         state.enter_directory();
@@ -1138,9 +1164,7 @@ mod tests {
     #[test]
     fn cancel_returns_cancelled() {
         let dir = make_dir_with_files();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         assert_eq!(state.result(), PickerResult::Pending);
         state.cancel();

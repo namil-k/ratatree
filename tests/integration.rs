@@ -1,7 +1,7 @@
-use std::fs;
 use ratatree::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use tempfile::TempDir;
 use ratatree::{FilePickerState, PickerMode, PickerResult, ViewMode};
+use std::fs;
+use tempfile::TempDir;
 
 fn key(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
@@ -41,9 +41,7 @@ fn setup_test_dir() -> TempDir {
 #[test]
 fn navigate_and_select_single_file() {
     let tmp = setup_test_dir();
-    let mut state = FilePickerState::builder()
-        .start_dir(tmp.path())
-        .build();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
 
     // Move down twice to reach index 2 (Cargo.toml)
     state.handle_event(key(KeyCode::Down));
@@ -57,7 +55,11 @@ fn navigate_and_select_single_file() {
     match state.result() {
         PickerResult::Selected(paths) => {
             assert_eq!(paths.len(), 1);
-            assert!(paths[0].ends_with("Cargo.toml"), "expected Cargo.toml, got {:?}", paths[0]);
+            assert!(
+                paths[0].ends_with("Cargo.toml"),
+                "expected Cargo.toml, got {:?}",
+                paths[0]
+            );
         }
         other => panic!("expected Selected, got {:?}", other),
     }
@@ -67,9 +69,7 @@ fn navigate_and_select_single_file() {
 #[test]
 fn multi_select_across_navigation() {
     let tmp = setup_test_dir();
-    let mut state = FilePickerState::builder()
-        .start_dir(tmp.path())
-        .build();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
 
     // Navigate to Cargo.toml (index 2)
     state.handle_event(key(KeyCode::Down));
@@ -98,8 +98,16 @@ fn multi_select_across_navigation() {
                 .iter()
                 .filter_map(|p| p.file_name().and_then(|n| n.to_str()))
                 .collect();
-            assert!(names.contains(&"Cargo.toml"), "expected Cargo.toml in {:?}", names);
-            assert!(names.contains(&"README.md"), "expected README.md in {:?}", names);
+            assert!(
+                names.contains(&"Cargo.toml"),
+                "expected Cargo.toml in {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"README.md"),
+                "expected README.md in {:?}",
+                names
+            );
         }
         other => panic!("expected Selected, got {:?}", other),
     }
@@ -111,9 +119,7 @@ fn directory_navigation() {
     let tmp = setup_test_dir();
     let original_dir = tmp.path().canonicalize().unwrap();
 
-    let mut state = FilePickerState::builder()
-        .start_dir(tmp.path())
-        .build();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
 
     // First entry should be src/ (dirs-first, alphabetical)
     let first = state.current_entry().expect("should have entry");
@@ -134,7 +140,11 @@ fn directory_navigation() {
     state.handle_event(key_char('h'));
 
     // Should be back at original dir
-    let back = state.common.current_dir.canonicalize().unwrap_or_else(|_| state.common.current_dir.clone());
+    let back = state
+        .common
+        .current_dir
+        .canonicalize()
+        .unwrap_or_else(|_| state.common.current_dir.clone());
     assert_eq!(back, original_dir, "expected to be back at original dir");
 }
 
@@ -142,9 +152,7 @@ fn directory_navigation() {
 #[test]
 fn view_toggle_preserves_directory() {
     let tmp = setup_test_dir();
-    let mut state = FilePickerState::builder()
-        .start_dir(tmp.path())
-        .build();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
 
     let dir_before = state.common.current_dir.clone();
     let count_before = state.visible_count();
@@ -165,14 +173,15 @@ fn view_toggle_preserves_directory() {
 #[test]
 fn hidden_files_toggle() {
     let tmp = setup_test_dir();
-    let mut state = FilePickerState::builder()
-        .start_dir(tmp.path())
-        .build();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
 
     let count_before = state.visible_count();
     // .gitignore is hidden so not counted initially
     assert!(
-        !state.visible_entries().iter().any(|e| e.name == ".gitignore"),
+        !state
+            .visible_entries()
+            .iter()
+            .any(|e| e.name == ".gitignore"),
         "should not see .gitignore before toggle"
     );
 
@@ -186,7 +195,10 @@ fn hidden_files_toggle() {
         count_after
     );
     assert!(
-        state.visible_entries().iter().any(|e| e.name == ".gitignore"),
+        state
+            .visible_entries()
+            .iter()
+            .any(|e| e.name == ".gitignore"),
         "should see .gitignore after toggle"
     );
 }
@@ -195,9 +207,7 @@ fn hidden_files_toggle() {
 #[test]
 fn search_and_confirm() {
     let tmp = setup_test_dir();
-    let mut state = FilePickerState::builder()
-        .start_dir(tmp.path())
-        .build();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
 
     // Enter search mode
     state.handle_event(key_char('/'));
@@ -221,7 +231,11 @@ fn search_and_confirm() {
     // Press Enter to exit search (keep filter)
     state.handle_event(key(KeyCode::Enter));
     assert_eq!(state.common.input_mode, ratatree::InputMode::Normal);
-    assert_eq!(state.visible_count(), 1, "filter should be preserved after Enter");
+    assert_eq!(
+        state.visible_count(),
+        1,
+        "filter should be preserved after Enter"
+    );
 
     // Press Enter again to confirm selection
     state.handle_event(key(KeyCode::Enter));
@@ -250,7 +264,11 @@ fn files_only_mode_blocks_dir_selection() {
 
     // First entry should be src/ (a directory)
     let first = state.current_entry().expect("should have entry");
-    assert_eq!(first.kind, ratatree::EntryKind::Directory, "first entry should be a dir");
+    assert_eq!(
+        first.kind,
+        ratatree::EntryKind::Directory,
+        "first entry should be a dir"
+    );
 
     // Attempt to select via Space
     state.handle_event(key_char(' '));
@@ -266,9 +284,7 @@ fn files_only_mode_blocks_dir_selection() {
 #[test]
 fn cancel_returns_cancelled() {
     let tmp = setup_test_dir();
-    let mut state = FilePickerState::builder()
-        .start_dir(tmp.path())
-        .build();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
 
     assert_eq!(state.result(), PickerResult::Pending);
     state.handle_event(key(KeyCode::Esc));
@@ -288,9 +304,26 @@ fn tree_view_expand_and_select_nested_file() {
 
     state.handle_event(key_char('l'));
 
-    assert_eq!(state.common.current_dir, root, "expanding does not change the root");
-    let names: Vec<&str> = state.visible_entries().iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, ["src", "lib.rs", "main.rs", "tests", "Cargo.toml", "README.md"]);
+    assert_eq!(
+        state.common.current_dir, root,
+        "expanding does not change the root"
+    );
+    let names: Vec<&str> = state
+        .visible_entries()
+        .iter()
+        .map(|e| e.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "src",
+            "lib.rs",
+            "main.rs",
+            "tests",
+            "Cargo.toml",
+            "README.md"
+        ]
+    );
 
     state.handle_event(key_char('j'));
     assert_eq!(state.current_entry().unwrap().name, "lib.rs");
@@ -300,7 +333,11 @@ fn tree_view_expand_and_select_nested_file() {
     match state.result() {
         PickerResult::Selected(paths) => {
             assert_eq!(paths.len(), 1);
-            assert!(paths[0].ends_with("src/lib.rs"), "expected src/lib.rs, got {:?}", paths[0]);
+            assert!(
+                paths[0].ends_with("src/lib.rs"),
+                "expected src/lib.rs, got {:?}",
+                paths[0]
+            );
         }
         other => panic!("expected Selected, got {:?}", other),
     }
@@ -323,9 +360,7 @@ fn symlink_cycle_detection() {
     fs::create_dir(tmp.path().join("other")).unwrap();
     symlink(tmp.path().join("other"), tmp.path().join("other_link")).unwrap();
 
-    let mut state = FilePickerState::builder()
-        .start_dir(tmp.path())
-        .build();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
 
     let idx_of = |state: &FilePickerState, name: &str| {
         state
@@ -339,7 +374,10 @@ fn symlink_cycle_detection() {
     // self_link is listed as a symlink and entering it is blocked immediately.
     // Note: Enter/confirm does not enter symlinks; 'l'/Right arrow calls enter_directory directly.
     *state.view.cursor_mut() = idx_of(&state, "self_link");
-    assert_eq!(state.current_entry().unwrap().kind, ratatree::EntryKind::Symlink);
+    assert_eq!(
+        state.current_entry().unwrap().kind,
+        ratatree::EntryKind::Symlink
+    );
     state.handle_event(key(KeyCode::Right));
 
     assert_eq!(

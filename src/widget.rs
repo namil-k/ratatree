@@ -109,7 +109,12 @@ fn render_file_list(area: Rect, buf: &mut Buffer, state: &mut FilePickerState) {
         ViewState::List(_) => None,
     };
 
-    for (row, entry) in entries.iter().enumerate().skip(scroll_offset).take(visible_height) {
+    for (row, entry) in entries
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_height)
+    {
         let y = area.y + (row - scroll_offset) as u16;
         let is_cursor = row == cursor;
         let is_selected = selected_paths.contains(&entry.path);
@@ -179,7 +184,11 @@ fn render_status_bar(area: Rect, buf: &mut Buffer, state: &FilePickerState) {
         }
         InputMode::Normal => {
             let selected_count = state.common.selected.len();
-            let hidden_str = if state.common.show_hidden { "on" } else { "off" };
+            let hidden_str = if state.common.show_hidden {
+                "on"
+            } else {
+                "off"
+            };
             let view_str = match &state.view {
                 ViewState::List(_) => "list",
                 ViewState::Tree(_) => "tree",
@@ -218,32 +227,32 @@ mod tests {
     #[test]
     fn renders_without_panic() {
         let dir = make_dir_with_files();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| {
-            let widget = FilePicker::default().block(Block::default().borders(Borders::ALL));
-            frame.render_stateful_widget(widget, frame.area(), &mut state);
-        }).unwrap();
+        terminal
+            .draw(|frame| {
+                let widget = FilePicker::default().block(Block::default().borders(Borders::ALL));
+                frame.render_stateful_widget(widget, frame.area(), &mut state);
+            })
+            .unwrap();
     }
 
     #[test]
     fn renders_wide_characters_without_overlap() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("한글.txt"), b"").unwrap();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         let backend = TestBackend::new(30, 4);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| {
-            frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
-        }).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+            })
+            .unwrap();
 
         // Row 1 is the first list row. After the 3-column prefix each Hangul syllable occupies two cells: the glyph, then a blank continuation.
         let buf = terminal.backend().buffer();
@@ -252,7 +261,9 @@ mod tests {
     }
 
     fn click(column: u16, row: u16) -> ratatui::crossterm::event::Event {
-        use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::crossterm::event::{
+            Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        };
         Event::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column,
@@ -272,17 +283,17 @@ mod tests {
     #[test]
     fn mouse_click_maps_to_rendered_row() {
         let dir = make_dir_with_files(); // subdir, alpha.txt, beta.rs
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         // Bordered widget at an offset: border on row 5, path bar on row 6, list rows start at row 7, columns 11..=38.
         let backend = TestBackend::new(60, 20);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| {
-            let widget = FilePicker::default().block(Block::default().borders(Borders::ALL));
-            frame.render_stateful_widget(widget, Rect::new(10, 5, 30, 8), &mut state);
-        }).unwrap();
+        terminal
+            .draw(|frame| {
+                let widget = FilePicker::default().block(Block::default().borders(Borders::ALL));
+                frame.render_stateful_widget(widget, Rect::new(10, 5, 30, 8), &mut state);
+            })
+            .unwrap();
 
         state.handle_event(click(15, 8));
         assert_eq!(state.view.cursor(), 1, "second list row");
@@ -292,25 +303,33 @@ mod tests {
         assert_eq!(state.view.cursor(), 0, "path bar click is ignored");
         state.handle_event(click(15, 8));
         state.handle_event(click(5, 8));
-        assert_eq!(state.view.cursor(), 1, "click left of the widget is ignored");
+        assert_eq!(
+            state.view.cursor(),
+            1,
+            "click left of the widget is ignored"
+        );
         state.handle_event(click(15, 11));
-        assert_eq!(state.view.cursor(), 1, "click below the last entry is ignored");
+        assert_eq!(
+            state.view.cursor(),
+            1,
+            "click below the last entry is ignored"
+        );
     }
 
     #[test]
     fn mouse_click_accounts_for_scroll_offset() {
         let dir = make_dir_with_n_files(10);
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
         *state.view.cursor_mut() = 5;
 
         // 5 rows: path bar, 3 list rows, status bar. Cursor 5 scrolls to entries 3..=5.
         let backend = TestBackend::new(30, 5);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| {
-            frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
-        }).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+            })
+            .unwrap();
         assert_eq!(state.view.scroll_offset(), 3);
 
         state.handle_event(click(0, 1));
@@ -320,9 +339,7 @@ mod tests {
     #[test]
     fn mouse_click_before_first_render_is_ignored() {
         let dir = make_dir_with_files();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
         *state.view.cursor_mut() = 1;
 
         state.handle_event(click(0, 2));
@@ -334,20 +351,26 @@ mod tests {
     fn half_page_uses_rendered_height() {
         use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
         let dir = make_dir_with_n_files(30);
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         // 14 rows: path bar + 12 list rows + status bar, so half a page is 6.
         let backend = TestBackend::new(30, 14);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| {
-            frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
-        }).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+            })
+            .unwrap();
 
-        state.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)));
+        state.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('d'),
+            KeyModifiers::CONTROL,
+        )));
         assert_eq!(state.view.cursor(), 6);
-        state.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)));
+        state.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('u'),
+            KeyModifiers::CONTROL,
+        )));
         assert_eq!(state.view.cursor(), 0);
     }
 
@@ -376,9 +399,11 @@ mod tests {
 
         let backend = TestBackend::new(40, 8);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| {
-            frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
-        }).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+            })
+            .unwrap();
 
         let rows: Vec<String> = (1..6).map(|y| row_text(&terminal, y)).collect();
         assert_eq!(
@@ -396,25 +421,23 @@ mod tests {
     #[test]
     fn renders_empty_directory() {
         let dir = TempDir::new().unwrap();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| {
-            let widget = FilePicker::default();
-            frame.render_stateful_widget(widget, frame.area(), &mut state);
-        }).unwrap();
+        terminal
+            .draw(|frame| {
+                let widget = FilePicker::default();
+                frame.render_stateful_widget(widget, frame.area(), &mut state);
+            })
+            .unwrap();
     }
 
     #[test]
     fn renders_with_selection() {
         let dir = make_dir_with_files();
-        let mut state = FilePickerState::builder()
-            .start_dir(dir.path())
-            .build();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
 
         // Find a file entry and select it
         let file_idx = state
@@ -431,9 +454,11 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| {
-            let widget = FilePicker::default();
-            frame.render_stateful_widget(widget, frame.area(), &mut state);
-        }).unwrap();
+        terminal
+            .draw(|frame| {
+                let widget = FilePicker::default();
+                frame.render_stateful_widget(widget, frame.area(), &mut state);
+            })
+            .unwrap();
     }
 }

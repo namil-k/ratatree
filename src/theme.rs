@@ -43,11 +43,17 @@ impl Default for FilePickerTheme {
     fn default() -> Self {
         Self {
             normal: Style::default(),
-            cursor: Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD),
+            cursor: Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
             selected: Style::default().fg(Color::Green),
-            directory: Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            directory: Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
             symlink: Style::default().fg(Color::Cyan),
-            path_bar: Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            path_bar: Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
             status_bar: Style::default().fg(Color::DarkGray),
             search_input: Style::default().fg(Color::Yellow),
             error: Style::default().fg(Color::Red),
