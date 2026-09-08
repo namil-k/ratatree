@@ -1,5 +1,9 @@
 # ratatree
 
+[![CI](https://github.com/namil-k/ratatree/actions/workflows/ci.yml/badge.svg)](https://github.com/namil-k/ratatree/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/ratatree.svg)](https://crates.io/crates/ratatree)
+[![docs.rs](https://img.shields.io/docsrs/ratatree)](https://docs.rs/ratatree)
+
 A file and directory picker widget for [ratatui](https://github.com/ratatui/ratatui).
 
 Drop it into any ratatui app. Your users get a full-featured file browser with keyboard navigation, fuzzy search, multi-select, and two view modes - all from a single widget.

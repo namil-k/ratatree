@@ -11,7 +11,7 @@ documentation = "https://docs.rs/ratatree"
 readme = "README.md"
 keywords = ["tui", "ratatui", "file-picker", "directory", "widget"]
 categories = ["command-line-interface"]
-exclude = ["docs/", ".superpowers/"]
+exclude = ["docs/", ".superpowers/", ".github/", ".git-blame-ignore-revs"]
 
 [dependencies]
 # The crossterm feature is what re-exports `ratatui::crossterm`, which this
