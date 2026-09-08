@@ -1,3 +1,5 @@
+//! The picker's state: what it is showing, where the cursor is, and what the user has chosen.
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -8,36 +10,56 @@ use crate::entry::{read_entries, Entry, EntryKind};
 use crate::theme::FilePickerTheme;
 use crate::view::{ListViewState, TreeViewState, ViewState};
 
-/// Type alias for an optional boxed filter predicate to avoid type complexity warnings.
+/// An optional predicate deciding which files to show, as stored on the picker.
+///
+/// Set it through [`FilePickerBuilder::filter`]. It is only consulted for files and symlinks; directories always pass so that their contents stay reachable.
 pub type FilterFn = Option<Box<dyn Fn(&Path) -> bool>>;
 
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
 
+/// What the picker is allowed to return.
+///
+/// This constrains confirming and multi-selecting, not navigation: directories are always listed and always enterable, whatever the mode. Symlinks are always selectable, because resolving them to decide would mean touching the filesystem on every keystroke.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickerMode {
+    /// Only files may be picked. `Enter` on a directory enters it instead of returning it.
     FilesOnly,
+    /// Only directories may be picked. `Enter` on a file does nothing.
     DirsOnly,
+    /// Files and directories may both be picked.
     Both,
 }
 
+/// Which view the picker starts in, as passed to [`FilePickerBuilder::view`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
+    /// One directory at a time.
     List,
+    /// Directories expand in place.
     Tree,
 }
 
+/// What the user has done so far, as reported by [`FilePickerState::result`].
+///
+/// Poll this after handing the picker an event. It stays [`Selected`](Self::Selected) or [`Cancelled`](Self::Cancelled) once set, so the application decides when to drop the picker rather than the picker resetting itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PickerResult {
+    /// Still browsing. Keep rendering and feeding it events.
     Pending,
+    /// The user confirmed these paths, sorted. Holds the whole multi-selection if there was one, otherwise the single entry under the cursor.
     Selected(Vec<PathBuf>),
+    /// The user pressed `Esc` or `q`.
     Cancelled,
 }
 
+/// Whether keystrokes are commands or search text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
+    /// Keys act as commands. `/` switches to [`Search`](Self::Search).
     Normal,
+    /// Printable keys append to the query, including `j` and `k`. Move through results with the arrow keys, `Ctrl+N`/`Ctrl+P` or `Ctrl+J`/`Ctrl+K`.
     Search,
 }
 
@@ -45,22 +67,37 @@ pub enum InputMode {
 // CommonState
 // ---------------------------------------------------------------------------
 
+/// Everything the picker tracks that does not depend on which view is active.
+///
+/// Both views read and write this same struct, which is why toggling views keeps the selection, the search query and the current directory intact. The fields are public so an application can inspect or drive the picker without going through the key map.
 pub struct CommonState {
+    /// The directory being listed. Canonicalized by [`FilePickerBuilder::build`] and kept canonical thereafter.
     pub current_dir: PathBuf,
+    /// The rows to draw. In list view these are the entries of [`current_dir`](Self::current_dir); in tree view they are that directory plus every expanded descendant, flattened in display order.
     pub entries: Vec<Entry>,
+    /// Indices into [`entries`](Self::entries) matching the search query, or `None` when no search is active.
     pub filtered_indices: Option<Vec<usize>>,
+    /// Paths toggled with `Space`. Confirming returns these instead of the entry under the cursor. Survives navigation, so a selection can span directories.
     pub selected: HashSet<PathBuf>,
+    /// Whether dotfiles are listed.
     pub show_hidden: bool,
+    /// What the picker is allowed to return.
     pub mode: PickerMode,
+    /// Whether keys are commands or search text.
     pub input_mode: InputMode,
+    /// The current search query. Empty when no search is active.
     pub search_query: String,
+    /// First half of a pending two-key sequence such as `gg`, with the time it was pressed so a stale prefix expires instead of arming forever.
     pub pending_key: Option<(char, Instant)>,
+    /// A message shown in place of the status bar, such as `Circular symlink`. Cleared on the next handled event.
     pub error_message: Option<String>,
+    /// What the user has done so far.
     pub result: PickerResult,
+    /// The file filter, if one was set.
     pub filter: FilterFn,
+    /// Styles used when drawing.
     pub theme: FilePickerTheme,
-    /// Screen area of the entry list from the last render. Mouse clicks and
-    /// page movements are resolved against it. Zero-sized until first render.
+    /// Screen area of the entry list from the last render. Mouse clicks and page movements are resolved against it. Zero-sized until first render.
     pub list_area: Rect,
 }
 
@@ -85,24 +122,47 @@ impl std::fmt::Debug for CommonState {
 // FilePickerState
 // ---------------------------------------------------------------------------
 
+/// The picker itself: hand it events, hand it to the widget, read its result.
+///
+/// Build one with [`builder`](Self::builder), then per frame render it with [`FilePicker`](crate::FilePicker), pass the terminal event to [`handle_event`](Self::handle_event), and check [`result`](Self::result).
+///
+/// ```
+/// use ratatree::{FilePickerState, PickerMode};
+///
+/// let state = FilePickerState::builder()
+///     .start_dir(".")
+///     .mode(PickerMode::Both)
+///     .build();
+///
+/// assert!(state.visible_count() > 0);
+/// ```
+///
+/// To use a different key map, ignore [`handle_event`](Self::handle_event) and call the movement and action methods directly.
 pub struct FilePickerState {
+    /// State shared by both views.
     pub common: CommonState,
+    /// The active view and its cursor, scroll and expansion state.
     pub view: ViewState,
 }
 
 impl FilePickerState {
+    /// Starts building a picker. See [`FilePickerBuilder`] for the options.
     pub fn builder() -> FilePickerBuilder {
         FilePickerBuilder::default()
     }
 
     // --- Result ---
 
+    /// What the user has done so far. Poll this after each event.
     pub fn result(&self) -> PickerResult {
         self.common.result.clone()
     }
 
     // --- Visible entries helpers ---
 
+    /// The entries currently on screen, which is the search matches while a search is active and every entry otherwise.
+    ///
+    /// The cursor indexes into this list, not into [`CommonState::entries`].
     pub fn visible_entries(&self) -> Vec<&Entry> {
         match &self.common.filtered_indices {
             Some(indices) => indices
@@ -113,6 +173,7 @@ impl FilePickerState {
         }
     }
 
+    /// How many entries are currently visible, without building the list.
     pub fn visible_count(&self) -> usize {
         match &self.common.filtered_indices {
             Some(indices) => indices.len(),
@@ -133,6 +194,7 @@ impl FilePickerState {
         }
     }
 
+    /// The entry under the cursor, or `None` if the listing is empty.
     pub fn current_entry(&self) -> Option<&Entry> {
         let cursor = self.view.cursor();
         let actual = self.actual_index(cursor)?;
@@ -141,6 +203,9 @@ impl FilePickerState {
 
     // --- Directory refresh ---
 
+    /// Re-reads the current directory from disk and rebuilds the entry list.
+    ///
+    /// In list view that is the directory's own entries; in tree view it is the directory plus every expanded descendant, flattened. Clears any active search filter and pulls the cursor back into range. Call this after changing the filesystem behind the picker's back.
     pub fn refresh_entries(&mut self) {
         let dir = self.common.current_dir.clone();
         let show_hidden = self.common.show_hidden;
@@ -162,17 +227,17 @@ impl FilePickerState {
         }
     }
 
-    /// Tree view only: show the children of the directory under the cursor.
+    /// Tree view only: shows the children of the directory under the cursor, keeping the cursor on it. Does nothing on a file or symlink.
     pub fn expand_current(&mut self) {
         self.set_expanded_current(true);
     }
 
-    /// Tree view only: hide the children of the directory under the cursor.
+    /// Tree view only: hides the children of the directory under the cursor, keeping the cursor on it. Does nothing on a file or symlink.
     pub fn collapse_current(&mut self) {
         self.set_expanded_current(false);
     }
 
-    /// Tree view only: expand or collapse the directory under the cursor.
+    /// Tree view only: expands the directory under the cursor if it is collapsed, and collapses it if it is expanded.
     pub fn toggle_expand_current(&mut self) {
         let Some(entry) = self.current_entry() else {
             return;
@@ -201,8 +266,7 @@ impl FilePickerState {
         self.move_cursor_to_path(&path);
     }
 
-    /// Moves the cursor to the visible entry with this path.
-    /// Returns false (leaving the cursor alone) if it is not visible.
+    /// Moves the cursor to the visible entry with this path. Returns false, leaving the cursor alone, if it is not visible.
     fn move_cursor_to_path(&mut self, path: &Path) -> bool {
         let found = self.visible_entries().iter().position(|e| e.path == path);
         match found {
@@ -245,9 +309,8 @@ impl FilePickerState {
     }
 
     /// Moves "into" the entry under the cursor.
-    /// List view: enters the directory. Tree view: expands a collapsed
-    /// directory, moves to the first child of an expanded one, and enters a
-    /// symlink as the new root because symlinks are never expanded in place.
+    ///
+    /// In list view this enters the directory. In tree view it expands a collapsed directory, moves to the first child of an expanded one, and enters a symlink as the new root because symlinks are never expanded in place. Files are ignored in both views.
     pub fn descend(&mut self) {
         if matches!(self.view, ViewState::List(_)) {
             self.enter_directory();
@@ -267,9 +330,8 @@ impl FilePickerState {
     }
 
     /// Moves "out of" the entry under the cursor.
-    /// List view: goes to the parent directory. Tree view: collapses an
-    /// expanded directory, moves a nested entry to its parent node, and goes
-    /// to the parent directory from a top-level entry.
+    ///
+    /// In list view this goes to the parent directory. In tree view it collapses an expanded directory, moves a nested entry to its parent node, and goes to the parent directory from a top-level entry.
     pub fn ascend(&mut self) {
         if matches!(self.view, ViewState::List(_)) {
             self.go_parent();
@@ -293,11 +355,15 @@ impl FilePickerState {
 
     // --- Toggles ---
 
+    /// Shows or hides dotfiles, then re-reads the listing.
     pub fn toggle_hidden(&mut self) {
         self.common.show_hidden = !self.common.show_hidden;
         self.refresh_entries();
     }
 
+    /// Adds or removes the entry under the cursor from the multi-selection.
+    ///
+    /// Does nothing if the current [`PickerMode`] would not allow picking that kind of entry.
     pub fn toggle_select(&mut self) {
         let entry = match self.current_entry() {
             Some(e) => e,
@@ -317,8 +383,7 @@ impl FilePickerState {
         }
     }
 
-    /// Whether an entry of this kind may be picked under the current `PickerMode`.
-    /// Symlinks are always allowed because their target kind is not known here.
+    /// Whether an entry of this kind may be picked under the current [`PickerMode`]. Symlinks are always allowed because their target kind is not known here.
     fn is_selectable(&self, kind: &EntryKind) -> bool {
         match self.common.mode {
             PickerMode::FilesOnly => *kind != EntryKind::Directory,
@@ -329,6 +394,9 @@ impl FilePickerState {
 
     // --- Confirm / Cancel ---
 
+    /// Acts on `Enter`.
+    ///
+    /// A non-empty multi-selection wins and is returned as [`PickerResult::Selected`], sorted. Otherwise, a directory under the cursor is entered in list view or expanded and collapsed in tree view, and any other entry the current [`PickerMode`] permits is returned on its own.
     pub fn confirm(&mut self) {
         if !self.common.selected.is_empty() {
             let mut paths: Vec<PathBuf> = self.common.selected.iter().cloned().collect();
@@ -353,12 +421,16 @@ impl FilePickerState {
         }
     }
 
+    /// Sets the result to [`PickerResult::Cancelled`].
     pub fn cancel(&mut self) {
         self.common.result = PickerResult::Cancelled;
     }
 
     // --- Directory navigation ---
 
+    /// Makes the directory under the cursor the new current directory, resetting the cursor and scroll.
+    ///
+    /// Files are ignored. Symlinks are followed, except one resolving to the current directory or an ancestor of it, which would only lead back to where the user already is; that sets `Circular symlink` in [`CommonState::error_message`] instead.
     pub fn enter_directory(&mut self) {
         let entry = match self.current_entry() {
             Some(e) => e,
@@ -376,8 +448,7 @@ impl FilePickerState {
             return;
         }
 
-        // A symlink that resolves to the current directory or one of its
-        // ancestors would only lead back to where we already are.
+        // A symlink that resolves to the current directory or one of its ancestors would only lead back to where we already are.
         if is_symlink && self.canonical_current_dir().starts_with(&canonical) {
             self.common.error_message = Some("Circular symlink".to_string());
             return;
@@ -396,6 +467,7 @@ impl FilePickerState {
             .unwrap_or_else(|_| self.common.current_dir.clone())
     }
 
+    /// Moves to the parent of the current directory, resetting the cursor and scroll. Does nothing at the filesystem root.
     pub fn go_parent(&mut self) {
         if let Some(parent) = self.common.current_dir.parent().map(|p| p.to_path_buf()) {
             self.common.current_dir = parent;
@@ -405,6 +477,7 @@ impl FilePickerState {
         }
     }
 
+    /// Moves to the user's home directory. Does nothing if there is no home directory to find.
     pub fn go_home(&mut self) {
         if let Some(home) = dirs::home_dir() {
             self.common.current_dir = home;
@@ -416,6 +489,7 @@ impl FilePickerState {
 
     // --- Cursor movement ---
 
+    /// Moves the cursor one entry down, stopping at the last one.
     pub fn move_cursor_down(&mut self) {
         let count = self.visible_count();
         if count == 0 {
@@ -427,6 +501,7 @@ impl FilePickerState {
         }
     }
 
+    /// Moves the cursor one entry up, stopping at the first one.
     pub fn move_cursor_up(&mut self) {
         let cursor = self.view.cursor_mut();
         if *cursor > 0 {
@@ -434,10 +509,12 @@ impl FilePickerState {
         }
     }
 
+    /// Moves the cursor to the first entry.
     pub fn move_to_top(&mut self) {
         *self.view.cursor_mut() = 0;
     }
 
+    /// Moves the cursor to the last entry.
     pub fn move_to_bottom(&mut self) {
         let count = self.visible_count();
         if count > 0 {
@@ -445,8 +522,7 @@ impl FilePickerState {
         }
     }
 
-    /// Number of entry rows shown by the last render, or a fallback before
-    /// the widget has been drawn.
+    /// Number of entry rows shown by the last render, or `20` before the widget has been drawn.
     pub fn page_height(&self) -> usize {
         match self.common.list_area.height {
             0 => 20,
@@ -454,6 +530,7 @@ impl FilePickerState {
         }
     }
 
+    /// Moves the cursor down half of `page_height` entries, stopping at the last one. Pass [`page_height`](Self::page_height) for the height actually on screen.
     pub fn move_half_page_down(&mut self, page_height: usize) {
         let half = page_height / 2;
         let count = self.visible_count();
@@ -464,6 +541,7 @@ impl FilePickerState {
         *cursor = (*cursor + half).min(count - 1);
     }
 
+    /// Moves the cursor up half of `page_height` entries, stopping at the first one.
     pub fn move_half_page_up(&mut self, page_height: usize) {
         let half = page_height / 2;
         let cursor = self.view.cursor_mut();
@@ -472,6 +550,9 @@ impl FilePickerState {
 
     // --- View toggle ---
 
+    /// Switches between the list and tree views.
+    ///
+    /// Rebuilds the entry list for the new view and keeps the cursor on the same path where that path is still visible, falling back to the first entry. Expansion state is not carried across, so returning to the tree view starts collapsed.
     pub fn toggle_view(&mut self) {
         let keep = self.current_entry().map(|e| e.path.clone());
         self.view = self.view.clone().toggle();
@@ -494,12 +575,18 @@ impl FilePickerState {
         }
     }
 
+    /// Pulls the cursor back into range after the visible entries changed underneath it.
     pub fn clamp_cursor_pub(&mut self) {
         self.clamp_cursor();
     }
 
     // --- Event handling ---
 
+    /// Applies the crate's default key and mouse map to one terminal event.
+    ///
+    /// The event type comes from [`ratatree::crossterm`](crate::crossterm), the re-export this crate was built against. Key releases are ignored, so terminals that report them do not act twice. Mouse clicks are resolved against [`CommonState::list_area`] and are therefore ignored before the first render.
+    ///
+    /// Applications wanting their own bindings can skip this and call the state methods directly.
     pub fn handle_event(&mut self, event: ratatui::crossterm::event::Event) {
         crate::event::handle_event(self, event);
     }
@@ -509,6 +596,9 @@ impl FilePickerState {
 // Builder
 // ---------------------------------------------------------------------------
 
+/// Builds a [`FilePickerState`], created by [`FilePickerState::builder`].
+///
+/// Every option has a default, so `FilePickerState::builder().build()` browses the process's current directory for files and directories alike.
 pub struct FilePickerBuilder {
     start_dir: Option<PathBuf>,
     mode: PickerMode,
@@ -532,36 +622,55 @@ impl Default for FilePickerBuilder {
 }
 
 impl FilePickerBuilder {
+    /// Where to start browsing. Defaults to the process's current directory.
+    ///
+    /// A leading `~` is expanded to the home directory and the result is canonicalized, so `"."` and `"~/projects"` both become absolute paths. A path that does not exist is expanded but otherwise left alone.
     pub fn start_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.start_dir = Some(dir.into());
         self
     }
 
+    /// What the picker may return. Defaults to [`PickerMode::Both`].
     pub fn mode(mut self, mode: PickerMode) -> Self {
         self.mode = mode;
         self
     }
 
+    /// Which view to start in. Defaults to [`ViewMode::List`].
     pub fn view(mut self, view_mode: ViewMode) -> Self {
         self.view_mode = view_mode;
         self
     }
 
+    /// Shows only the files this predicate accepts.
+    ///
+    /// Directories are never passed to it and always remain visible, so filtering by extension does not make subdirectories unreachable.
+    ///
+    /// ```
+    /// use ratatree::FilePickerState;
+    ///
+    /// let state = FilePickerState::builder()
+    ///     .filter(|path| path.extension().is_some_and(|e| e == "rs"))
+    ///     .build();
+    /// ```
     pub fn filter(mut self, f: impl Fn(&Path) -> bool + 'static) -> Self {
         self.filter = Some(Box::new(f));
         self
     }
 
+    /// Colors and modifiers to draw with. Defaults to [`FilePickerTheme::default`].
     pub fn theme(mut self, theme: FilePickerTheme) -> Self {
         self.theme = theme;
         self
     }
 
+    /// Whether to list dotfiles. Defaults to `false`.
     pub fn show_hidden(mut self, show: bool) -> Self {
         self.show_hidden = show;
         self
     }
 
+    /// Builds the picker and reads the starting directory.
     pub fn build(self) -> FilePickerState {
         let start_dir = self
             .start_dir
@@ -600,9 +709,7 @@ impl FilePickerBuilder {
     }
 }
 
-/// Expands a leading `~` to the home directory and resolves the result to an
-/// absolute path with symlinks removed. A path that does not exist is kept as
-/// is (after tilde expansion) so the picker can still show it in the path bar.
+/// Expands a leading `~` to the home directory and resolves the result to an absolute path with symlinks removed. A path that does not exist is kept as is, after tilde expansion, so the picker can still show it in the path bar.
 fn resolve_start_dir(dir: PathBuf) -> PathBuf {
     let expanded = expand_tilde(dir);
     expanded.canonicalize().unwrap_or(expanded)
@@ -1017,8 +1124,7 @@ mod tests {
         state.go_parent();
         assert!(!state.common.current_dir.ends_with("subdir"));
 
-        // Entering the same directory a second time must work and must not
-        // be mistaken for a circular symlink.
+        // Entering the same directory a second time must work and must not be mistaken for a circular symlink.
         state.enter_directory();
         assert!(
             state.common.current_dir.ends_with("subdir"),

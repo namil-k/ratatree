@@ -21,8 +21,7 @@ pub fn handle_event(state: &mut FilePickerState, event: Event) {
 }
 
 fn handle_key(state: &mut FilePickerState, key: KeyEvent) {
-    // Terminals that report key releases (Windows, kitty protocol) would
-    // otherwise trigger every binding twice.
+    // Terminals that report key releases (Windows, kitty protocol) would otherwise trigger every binding twice.
     if key.kind == KeyEventKind::Release {
         return;
     }
@@ -166,8 +165,7 @@ fn handle_mouse(state: &mut FilePickerState, mouse: MouseEvent) {
     state.common.error_message = None;
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            // Map the click through the list area recorded by the last render,
-            // so borders, offsets and scrolling are all accounted for.
+            // Map the click through the list area recorded by the last render, so borders, offsets and scrolling are all accounted for.
             let area = state.common.list_area;
             if !area.contains(Position::new(mouse.column, mouse.row)) {
                 return;

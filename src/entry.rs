@@ -1,25 +1,40 @@
+//! Directory entries and the code that reads them off disk.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// What a directory entry is, as reported by [`std::fs::symlink_metadata`].
+///
+/// Symlinks are their own kind rather than being resolved to what they point at, so the picker can show them as links and decide separately whether following one is safe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryKind {
+    /// A regular file.
     File,
+    /// A directory.
     Directory,
+    /// A symbolic link, whatever its target turns out to be.
     Symlink,
 }
 
+/// One row in the picker: a single file, directory or symlink.
 #[derive(Debug, Clone)]
 pub struct Entry {
+    /// The final component of the path, without any directory part.
     pub name: String,
+    /// Full path to the entry. This is what ends up in [`PickerResult::Selected`](crate::PickerResult::Selected).
     pub path: PathBuf,
+    /// Whether this is a file, a directory or a symlink.
     pub kind: EntryKind,
+    /// Whether the name starts with a dot. Hidden entries are filtered out unless the picker is showing them.
     pub is_hidden: bool,
-    /// Nesting level below the picker's current directory. Always 0 in list
-    /// view; in tree view, children of an expanded directory are one deeper.
+    /// Nesting level below the picker's current directory. Always `0` in list view; in tree view, children of an expanded directory are one deeper.
     pub depth: usize,
 }
 
 impl Entry {
+    /// Reads the entry at `path`, or returns `None` if it has no file name or cannot be stat'd.
+    ///
+    /// The kind comes from [`symlink_metadata`](std::fs::symlink_metadata) rather than [`metadata`](std::fs::metadata), so a symlink is reported as [`EntryKind::Symlink`] instead of as whatever it points at. `depth` is always `0` here; the tree view sets it while flattening.
     pub fn from_path(path: &Path) -> Option<Entry> {
         let name = path.file_name()?.to_string_lossy().to_string();
         let is_hidden = name.starts_with('.');
@@ -35,6 +50,11 @@ impl Entry {
     }
 }
 
+/// Reads `dir` into a sorted list of entries, dropping hidden ones unless `show_hidden` is set.
+///
+/// `filter` is applied to files and symlinks only. Directories always pass, because hiding them would make their contents unreachable in a picker that navigates by entering them.
+///
+/// Directories sort before everything else, then names sort case-insensitively. An unreadable directory yields an empty list rather than an error, so a permission problem shows up as an empty pane instead of breaking the render.
 pub fn read_entries(
     dir: &Path,
     show_hidden: bool,

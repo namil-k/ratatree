@@ -1,22 +1,28 @@
+//! Flattening an expanded directory tree into the picker's entry list.
+
 use std::path::Path;
 
 use super::TreeViewState;
 use crate::entry::{read_entries, Entry, EntryKind};
 
 impl TreeViewState {
+    /// Expands `path` if it is collapsed, and collapses it if it is expanded.
+    ///
+    /// The path is not checked against the filesystem, so expanding something that is not a directory simply adds an entry that [`build_tree_entries`](Self::build_tree_entries) never uses.
     pub fn toggle_expand(&mut self, path: &Path) {
         if !self.expanded.remove(path) {
             self.expanded.insert(path.to_path_buf());
         }
     }
 
+    /// Whether this path's children are currently shown.
     pub fn is_expanded(&self, path: &Path) -> bool {
         self.expanded.contains(path)
     }
 
-    /// Flattens `root` and every expanded directory below it into a single
-    /// list in display order, with each entry's `depth` set to its nesting
-    /// level. Symlinks are never expanded, which also rules out cycles.
+    /// Flattens `root` and every expanded directory below it into a single list in display order, with each entry's [`depth`](crate::Entry::depth) set to its nesting level.
+    ///
+    /// Symlinks are never expanded, which also rules out cycles. `show_hidden` and `filter` apply at every level, exactly as when listing a single directory.
     pub fn build_tree_entries(
         &self,
         root: &Path,

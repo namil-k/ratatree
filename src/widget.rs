@@ -1,3 +1,5 @@
+//! Drawing the picker.
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
@@ -12,12 +14,20 @@ use crate::view::ViewState;
 const EXPANDED_MARKER: &str = "\u{25be} "; // ▾
 const COLLAPSED_MARKER: &str = "\u{25b8} "; // ▸
 
+/// Draws a [`FilePickerState`].
+///
+/// The widget holds no state of its own beyond an optional [`Block`], so construct one per frame with [`FilePicker::default`].
+///
+/// It splits its area into a one-row path bar, the entry list, and a one-row status bar, and needs at least three rows or it draws nothing. Each entry row is a three-column prefix (`*` when multi-selected), the name, and a suffix (`/` for directories, `->` for symlinks); tree view adds two spaces of indent per level and a `▾` or `▸` marker on directories. The cursor is a style applied across the full row rather than a marker character.
+///
+/// Rendering records the list area on the state, which is what makes mouse clicks land on the right entry, so clicks arriving before the first render are ignored.
 #[derive(Default)]
 pub struct FilePicker {
     block: Option<Block<'static>>,
 }
 
 impl FilePicker {
+    /// Draws the picker inside this block and uses its inner area, letting the caller supply borders, a title or padding.
     pub fn block(mut self, block: Block<'static>) -> Self {
         self.block = Some(block);
         self
@@ -120,8 +130,7 @@ fn render_file_list(area: Rect, buf: &mut Buffer, state: &mut FilePickerState) {
             EntryKind::File => "",
         };
 
-        // Tree view: indent by depth and mark directories as expanded or
-        // collapsed. Files get a blank marker so names line up per level.
+        // Tree view: indent by depth and mark directories as expanded or collapsed. Files get a blank marker so names line up per level.
         let indent = "  ".repeat(entry.depth);
         let marker = match tree {
             Some(tree) if entry.kind == EntryKind::Directory => {
@@ -135,8 +144,7 @@ fn render_file_list(area: Rect, buf: &mut Buffer, state: &mut FilePickerState) {
             None => "",
         };
 
-        // Line handles grapheme widths, so wide characters (CJK, emoji)
-        // take the cells they need instead of overlapping the next glyph.
+        // Line handles grapheme widths, so wide characters (CJK, emoji) take the cells they need instead of overlapping the next glyph.
         let line = Line::from(vec![
             Span::styled(prefix, prefix_style),
             Span::styled(format!("{indent}{marker}"), name_style),
@@ -237,8 +245,7 @@ mod tests {
             frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
         }).unwrap();
 
-        // Row 1 is the first list row. After the 3-column prefix each Hangul
-        // syllable occupies two cells: the glyph, then a blank continuation.
+        // Row 1 is the first list row. After the 3-column prefix each Hangul syllable occupies two cells: the glyph, then a blank continuation.
         let buf = terminal.backend().buffer();
         let symbols: Vec<&str> = (3..11).map(|x| buf[(x, 1)].symbol()).collect();
         assert_eq!(symbols, ["한", " ", "글", " ", ".", "t", "x", "t"]);
@@ -269,8 +276,7 @@ mod tests {
             .start_dir(dir.path())
             .build();
 
-        // Bordered widget at an offset: border on row 5, path bar on row 6,
-        // list rows start at row 7, columns 11..=38.
+        // Bordered widget at an offset: border on row 5, path bar on row 6, list rows start at row 7, columns 11..=38.
         let backend = TestBackend::new(60, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| {

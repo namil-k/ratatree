@@ -1,7 +1,9 @@
+//! List view helpers.
+
 use super::ListViewState;
 
 impl ListViewState {
-    /// Returns the visible range of entries for the current scroll state.
+    /// The range of entry indices that fit on screen, given `total` entries and a pane `height` rows tall. Clamped to `total`, so a short listing yields a short range.
     pub fn visible_range(&self, total: usize, height: usize) -> std::ops::Range<usize> {
         let start = self.scroll_offset;
         let end = (start + height).min(total);
