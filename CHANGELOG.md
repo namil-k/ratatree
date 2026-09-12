@@ -4,6 +4,34 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - unreleased
+
+Reusable state, a read failure that stays on screen, clean paths on Windows, and two renames that make the next field addition a non-breaking change.
+
+### Migration
+
+- Replace `clamp_cursor_pub()` with `clamp_cursor()`.
+- `CommonState` and `FilePickerState` are now `#[non_exhaustive]`. Code that built either with a struct literal must go through `FilePickerState::builder()` instead. Reading and writing the public fields is unchanged.
+- `TreeViewState::build_tree_entries` returns `io::Result<Vec<Entry>>`. Only callers of that method directly are affected; `refresh_entries` handles it.
+- A directory read failure no longer appears in `CommonState::error_message`. Read it from `CommonState::read_error`.
+
+### Added
+
+- `FilePickerState::reset()` - puts a finished picker back to `PickerResult::Pending` and clears the selection, search, pending key prefix and error message. The current directory, cursor, scroll and tree expansion are kept, so the user resumes where they left off. Previously a state whose result was `Selected` or `Cancelled` ignored every event for good.
+- `CommonState::read_error` - why the current directory could not be listed, or `None` after a successful read. Unlike `error_message` it is not cleared by the next keypress; it goes away when a directory read succeeds. The status bar shows it whenever there is no one-off `error_message`, so an empty listing keeps explaining itself. This is the 0.2.1 "Known limitation".
+- `FilePickerState` implements `Debug`.
+
+### Changed
+
+- `clamp_cursor_pub` is now `clamp_cursor`. The private method took the public name; there was never a reason for two.
+- `CommonState` and `FilePickerState` are `#[non_exhaustive]`.
+- `TreeViewState::build_tree_entries` returns `io::Result<Vec<Entry>>`. A failure to read the root is now an error; an unreadable expanded subdirectory is still skipped, as in 0.2.1.
+
+### Fixed
+
+- On Windows, `current_dir`, every entry path and every path returned through `PickerResult::Selected` carried the `\\?\` verbatim prefix that `std::fs::canonicalize` adds. Paths are now canonicalized with `dunce`, which drops the prefix whenever the path is short enough to work without it.
+- In tree view, a root directory that could not be read rendered as an empty pane with no message. The 0.2.1 fix only covered list view.
+
 ## [0.2.1] - 2026-09-08
 
 ### Fixed

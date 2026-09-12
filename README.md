@@ -28,7 +28,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ratatree = "0.2"
+ratatree = "0.3"
 ratatui = "0.30"
 ```
 
@@ -233,6 +233,8 @@ impl App {
     }
 }
 ```
+
+Dropping the state is the simplest option. To reopen the picker where the user left it, keep the state and call `reset()` instead: it puts the result back to `Pending` and clears the selection and search while keeping the current directory and cursor.
 
 ## Running the Example
 
