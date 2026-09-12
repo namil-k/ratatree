@@ -70,6 +70,13 @@ pub enum InputMode {
 /// Everything the picker tracks that does not depend on which view is active.
 ///
 /// Both views read and write this same struct, which is why toggling views keeps the selection, the search query and the current directory intact. The fields are public so an application can inspect or drive the picker without going through the key map.
+///
+/// The struct is `#[non_exhaustive]`, so it can only be created through [`FilePickerState::builder`]. That is what lets a later release add a field without breaking existing code.
+///
+/// ```compile_fail
+/// let state: ratatree::CommonState = ratatree::CommonState { ..unimplemented!() };
+/// ```
+#[non_exhaustive]
 pub struct CommonState {
     /// The directory being listed. Canonicalized by [`FilePickerBuilder::build`] and kept canonical thereafter.
     pub current_dir: PathBuf,
@@ -89,8 +96,10 @@ pub struct CommonState {
     pub search_query: String,
     /// First half of a pending two-key sequence such as `gg`, with the time it was pressed so a stale prefix expires instead of arming forever.
     pub pending_key: Option<(char, Instant)>,
-    /// A message shown in place of the status bar, such as `Circular symlink` or `Cannot read directory: permission denied`. Cleared on the next handled event.
+    /// A one-off message shown in place of the status bar, such as `Circular symlink`. Cleared on the next handled event.
     pub error_message: Option<String>,
+    /// Why [`current_dir`](Self::current_dir) could not be listed, such as `Cannot read directory: permission denied`, or `None` when the last read succeeded. Unlike [`error_message`](Self::error_message) this stays until a directory read succeeds, so the status bar keeps explaining an empty listing for as long as it is empty.
+    pub read_error: Option<String>,
     /// What the user has done so far.
     pub result: PickerResult,
     /// The file filter, if one was set.
@@ -113,6 +122,8 @@ impl std::fmt::Debug for CommonState {
             .field("mode", &self.mode)
             .field("input_mode", &self.input_mode)
             .field("search_query", &self.search_query)
+            .field("error_message", &self.error_message)
+            .field("read_error", &self.read_error)
             .field("result", &self.result)
             .finish()
     }
@@ -138,7 +149,10 @@ impl std::fmt::Debug for CommonState {
 /// ```
 ///
 /// To use a different key map, ignore [`handle_event`](Self::handle_event) and call the movement and action methods directly.
+///
+/// Like [`CommonState`] this is `#[non_exhaustive]`: build one with the builder, not a struct literal.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct FilePickerState {
     /// State shared by both views.
     pub common: CommonState,
@@ -211,15 +225,19 @@ impl FilePickerState {
         let dir = self.common.current_dir.clone();
         let show_hidden = self.common.show_hidden;
         let filter = self.common.filter.as_deref();
-        self.common.entries = match &self.view {
-            ViewState::List(_) => match read_entries(&dir, show_hidden, filter) {
-                Ok(entries) => entries,
-                Err(err) => {
-                    self.common.error_message = Some(read_failure_message(&err));
-                    Vec::new()
-                }
-            },
+        let read = match &self.view {
+            ViewState::List(_) => read_entries(&dir, show_hidden, filter),
             ViewState::Tree(tree) => tree.build_tree_entries(&dir, show_hidden, filter),
+        };
+        self.common.entries = match read {
+            Ok(entries) => {
+                self.common.read_error = None;
+                entries
+            }
+            Err(err) => {
+                self.common.read_error = Some(read_failure_message(&err));
+                Vec::new()
+            }
         };
         self.common.filtered_indices = None;
         self.clamp_cursor();
@@ -701,7 +719,7 @@ impl FilePickerBuilder {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
         let current_dir = resolve_start_dir(start_dir);
 
-        let (entries, error_message) =
+        let (entries, read_error) =
             match read_entries(&current_dir, self.show_hidden, self.filter.as_deref()) {
                 Ok(entries) => (entries, None),
                 Err(err) => (Vec::new(), Some(read_failure_message(&err))),
@@ -722,7 +740,8 @@ impl FilePickerBuilder {
             input_mode: InputMode::Normal,
             search_query: String::new(),
             pending_key: None,
-            error_message,
+            error_message: None,
+            read_error,
             result: PickerResult::Pending,
             filter: self.filter,
             theme: self.theme,
@@ -1014,8 +1033,87 @@ mod tests {
 
         assert!(state.common.entries.is_empty());
         assert!(
-            state.common.error_message.is_some(),
+            state.common.read_error.is_some(),
             "an unreadable directory must say why, not just render as empty"
+        );
+        assert_eq!(
+            state.common.error_message, None,
+            "the read failure lives in read_error only, not duplicated into the transient message"
+        );
+    }
+
+    #[test]
+    fn read_error_clears_once_a_directory_can_be_read() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("marker.txt"), b"").unwrap();
+        let missing = dir.path().join("no-such-directory");
+        let mut state = FilePickerState::builder().start_dir(&missing).build();
+        assert!(state.common.read_error.is_some());
+
+        state.go_parent();
+
+        assert_eq!(state.common.read_error, None);
+        assert_eq!(
+            state.common.entries.len(),
+            1,
+            "the parent was actually read"
+        );
+    }
+
+    #[test]
+    fn tree_view_reports_an_unreadable_root_too() {
+        let dir = make_dir_with_files();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .view(ViewMode::Tree)
+            .build();
+        assert_eq!(state.common.read_error, None);
+
+        // Navigate into a directory that cannot be read, the way go_parent or enter_directory would.
+        state.common.current_dir = dir.path().join("no-such-directory");
+        state.refresh_entries();
+
+        assert!(state.common.entries.is_empty());
+        assert!(
+            state.common.read_error.is_some(),
+            "the tree view must not swallow a root read failure"
+        );
+    }
+
+    #[test]
+    fn tree_view_clears_read_error_once_root_can_be_read() {
+        let dir = make_dir_with_files();
+        let missing = dir.path().join("no-such-directory");
+        let mut state = FilePickerState::builder()
+            .start_dir(&missing)
+            .view(ViewMode::Tree)
+            .build();
+        assert!(state.common.read_error.is_some());
+
+        state.go_parent();
+
+        assert_eq!(state.common.read_error, None);
+        assert_eq!(
+            state.common.entries.len(),
+            3,
+            "the parent was actually read"
+        );
+    }
+
+    #[test]
+    fn read_error_survives_key_presses() {
+        use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("no-such-directory");
+        let mut state = FilePickerState::builder().start_dir(&missing).build();
+        let before = state.common.read_error.clone();
+        assert!(before.is_some());
+
+        state.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
+
+        assert_eq!(
+            state.common.read_error, before,
+            "a directory that is still unreadable keeps saying so"
         );
     }
 

@@ -167,9 +167,14 @@ fn render_file_list(area: Rect, buf: &mut Buffer, state: &mut FilePickerState) {
 fn render_status_bar(area: Rect, buf: &mut Buffer, state: &FilePickerState) {
     let theme = &state.common.theme;
 
-    // Error message takes priority
-    if let Some(err) = &state.common.error_message {
-        let para = Paragraph::new(Line::from(Span::styled(err.clone(), theme.error)));
+    // A one-off message wins over the standing read error, which in turn wins over the ordinary status line.
+    let error = state
+        .common
+        .error_message
+        .as_deref()
+        .or(state.common.read_error.as_deref());
+    if let Some(err) = error {
+        let para = Paragraph::new(Line::from(Span::styled(err.to_string(), theme.error)));
         para.render(area, buf);
         return;
     }
@@ -416,6 +421,46 @@ mod tests {
                 "     top.txt",
             ]
         );
+    }
+
+    #[test]
+    fn status_bar_shows_read_error_while_directory_is_unreadable() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("no-such-directory");
+        let mut state = FilePickerState::builder().start_dir(&missing).build();
+        assert!(state.common.read_error.is_some());
+
+        let backend = TestBackend::new(60, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+            })
+            .unwrap();
+
+        let status = row_text(&terminal, 3);
+        assert!(
+            status.starts_with("Cannot read directory:"),
+            "status bar should explain the empty listing, got {status:?}"
+        );
+    }
+
+    #[test]
+    fn transient_error_message_takes_priority_over_read_error() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("no-such-directory");
+        let mut state = FilePickerState::builder().start_dir(&missing).build();
+        state.common.error_message = Some("Circular symlink".to_string());
+
+        let backend = TestBackend::new(60, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+            })
+            .unwrap();
+
+        assert_eq!(row_text(&terminal, 3), "Circular symlink");
     }
 
     #[test]

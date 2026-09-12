@@ -23,15 +23,18 @@ impl TreeViewState {
     /// Flattens `root` and every expanded directory below it into a single list in display order, with each entry's [`depth`](crate::Entry::depth) set to its nesting level.
     ///
     /// Symlinks are never expanded, which also rules out cycles. `show_hidden` and `filter` apply at every level, exactly as when listing a single directory.
+    ///
+    /// Only a failure to read `root` itself is an error. An expanded subdirectory that cannot be read is skipped, because a large tree often contains a few and failing on each would lose the whole listing.
     pub fn build_tree_entries(
         &self,
         root: &Path,
         show_hidden: bool,
         filter: Option<&dyn Fn(&Path) -> bool>,
-    ) -> Vec<Entry> {
+    ) -> std::io::Result<Vec<Entry>> {
         let mut result = Vec::new();
-        self.collect_entries(root, 0, show_hidden, filter, &mut result);
-        result
+        let entries = read_entries(root, show_hidden, filter)?;
+        self.push_entries(entries, 0, show_hidden, filter, &mut result);
+        Ok(result)
     }
 
     fn collect_entries(
@@ -48,6 +51,17 @@ impl TreeViewState {
         let Ok(entries) = read_entries(dir, show_hidden, filter) else {
             return;
         };
+        self.push_entries(entries, depth, show_hidden, filter, result);
+    }
+
+    fn push_entries(
+        &self,
+        entries: Vec<Entry>,
+        depth: usize,
+        show_hidden: bool,
+        filter: Option<&dyn Fn(&Path) -> bool>,
+        result: &mut Vec<Entry>,
+    ) {
         for mut entry in entries {
             entry.depth = depth;
             let expand = entry.kind == EntryKind::Directory && self.is_expanded(&entry.path);
@@ -83,7 +97,7 @@ mod tests {
         let mut tree = TreeViewState::new();
         tree.toggle_expand(&locked);
         tree.toggle_expand(&root.join("b_open"));
-        let entries = tree.build_tree_entries(root, false, None);
+        let entries = tree.build_tree_entries(root, false, None).unwrap();
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
@@ -113,7 +127,7 @@ mod tests {
         fs::create_dir(tmp.path().join("subdir")).unwrap();
         fs::write(tmp.path().join("subdir").join("b.txt"), "").unwrap();
         let state = TreeViewState::new();
-        let tree = state.build_tree_entries(tmp.path(), false, None);
+        let tree = state.build_tree_entries(tmp.path(), false, None).unwrap();
         assert_eq!(tree.len(), 2); // subdir + a.txt
         assert!(tree.iter().all(|e| e.depth == 0));
     }
@@ -127,7 +141,7 @@ mod tests {
         fs::write(subdir.join("b.txt"), "").unwrap();
         let mut state = TreeViewState::new();
         state.toggle_expand(&subdir);
-        let tree = state.build_tree_entries(tmp.path(), false, None);
+        let tree = state.build_tree_entries(tmp.path(), false, None).unwrap();
         assert_eq!(tree.len(), 3); // subdir, b.txt (inside), a.txt
         let sub_entry = tree.iter().find(|e| e.name == "b.txt").unwrap();
         assert_eq!(sub_entry.depth, 1);
