@@ -67,10 +67,40 @@ impl StatefulWidget for FilePicker {
     }
 }
 
+/// Shortens a path for a bar `width` columns wide by dropping leading components, so the directory the user is actually in stays visible. A lone last component that is still too wide is cut from the front.
+fn truncate_path_left(path: &str, width: usize) -> String {
+    let display_width = |s: &str| Span::raw(s).width();
+    if display_width(path) <= width {
+        return path.to_string();
+    }
+    const ELLIPSIS: &str = "…";
+    if width <= 1 {
+        return ELLIPSIS.to_string();
+    }
+    let sep = std::path::MAIN_SEPARATOR.to_string();
+    let parts: Vec<&str> = path.split(std::path::MAIN_SEPARATOR).collect();
+    for start in 1..parts.len() {
+        let candidate = format!("{ELLIPSIS}{sep}{}", parts[start..].join(&sep));
+        if display_width(&candidate) <= width {
+            return candidate;
+        }
+    }
+    let last = parts.last().copied().unwrap_or("");
+    let mut chars: Vec<char> = last.chars().collect();
+    loop {
+        let candidate = format!("{ELLIPSIS}{}", chars.iter().collect::<String>());
+        if display_width(&candidate) <= width || chars.is_empty() {
+            return candidate;
+        }
+        chars.remove(0);
+    }
+}
+
 fn render_path_bar(area: Rect, buf: &mut Buffer, state: &FilePickerState) {
-    let path_str = state.common.current_dir.to_string_lossy().to_string();
+    let path_str = state.common.current_dir.to_string_lossy();
+    let shown = truncate_path_left(&path_str, area.width as usize);
     let style = state.common.theme.path_bar;
-    let para = Paragraph::new(Line::from(Span::styled(path_str, style)));
+    let para = Paragraph::new(Line::from(Span::styled(shown, style)));
     para.render(area, buf);
 }
 
@@ -227,6 +257,74 @@ mod tests {
         fs::write(dir.path().join("beta.rs"), b"").unwrap();
         fs::create_dir(dir.path().join("subdir")).unwrap();
         dir
+    }
+
+    #[test]
+    fn short_path_is_left_alone() {
+        assert_eq!(truncate_path_left("/a/b", 10), "/a/b");
+        assert_eq!(truncate_path_left("/a/b", 4), "/a/b");
+    }
+
+    #[test]
+    fn long_path_keeps_its_tail_and_cuts_at_a_component() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let path = [
+            "",
+            "Users",
+            "namilkim",
+            "Library",
+            "Application Support",
+            "app",
+        ]
+        .join(&sep.to_string());
+        let got = truncate_path_left(&path, 30);
+        assert_eq!(got, format!("…{sep}Application Support{sep}app"));
+        assert!(Span::raw(&got).width() <= 30);
+    }
+
+    #[test]
+    fn last_component_wider_than_the_bar_is_cut_from_the_front() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let path = ["", "x", "abcdefghijklmnop"].join(&sep.to_string());
+        assert_eq!(truncate_path_left(&path, 8), "…jklmnop");
+    }
+
+    #[test]
+    fn wide_characters_are_measured_by_columns() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let path = ["", "홈", "문서", "프로젝트"].join(&sep.to_string());
+        // "프로젝트" is 8 columns; with the separator and the ellipsis that is 10.
+        let got = truncate_path_left(&path, 10);
+        assert_eq!(got, format!("…{sep}프로젝트"));
+        assert_eq!(Span::raw(&got).width(), 10);
+    }
+
+    #[test]
+    fn bar_of_one_column_shows_only_the_ellipsis() {
+        assert_eq!(truncate_path_left("/a/b", 1), "…");
+    }
+
+    #[test]
+    fn path_bar_keeps_the_directory_name_when_the_panel_is_narrow() {
+        let dir = TempDir::new().unwrap();
+        let deep = dir
+            .path()
+            .join("a-rather-long-directory-name")
+            .join("target");
+        fs::create_dir_all(&deep).unwrap();
+        let mut state = FilePickerState::builder().start_dir(&deep).build();
+
+        let backend = TestBackend::new(20, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+            })
+            .unwrap();
+
+        let bar = row_text(&terminal, 0);
+        assert!(bar.starts_with('…'), "got {bar:?}");
+        assert!(bar.ends_with("target"), "got {bar:?}");
     }
 
     #[test]
