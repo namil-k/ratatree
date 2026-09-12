@@ -485,7 +485,7 @@ impl FilePickerState {
             return;
         }
         let is_symlink = entry.kind == EntryKind::Symlink;
-        let Ok(canonical) = entry.path.canonicalize() else {
+        let Ok(canonical) = dunce::canonicalize(&entry.path) else {
             return;
         };
         if !canonical.is_dir() {
@@ -505,9 +505,7 @@ impl FilePickerState {
     }
 
     fn canonical_current_dir(&self) -> PathBuf {
-        self.common
-            .current_dir
-            .canonicalize()
+        dunce::canonicalize(&self.common.current_dir)
             .unwrap_or_else(|_| self.common.current_dir.clone())
     }
 
@@ -760,7 +758,7 @@ fn read_failure_message(err: &std::io::Error) -> String {
 
 fn resolve_start_dir(dir: PathBuf) -> PathBuf {
     let expanded = expand_tilde(dir);
-    expanded.canonicalize().unwrap_or(expanded)
+    dunce::canonicalize(&expanded).unwrap_or(expanded)
 }
 
 fn expand_tilde(dir: PathBuf) -> PathBuf {
@@ -802,7 +800,7 @@ mod tests {
     /// Root order: a_dir, b_dir, top.txt. Inside a_dir: nested, inner.txt.
     fn make_tree_dir() -> (TempDir, PathBuf) {
         let tmp = TempDir::new().unwrap();
-        let root = tmp.path().canonicalize().unwrap().join("root");
+        let root = dunce::canonicalize(tmp.path()).unwrap().join("root");
         fs::create_dir_all(root.join("a_dir").join("nested")).unwrap();
         fs::write(root.join("a_dir").join("nested").join("deep.txt"), b"").unwrap();
         fs::write(root.join("a_dir").join("inner.txt"), b"").unwrap();
@@ -904,7 +902,7 @@ mod tests {
         state.ascend(); // collapsed dir at depth 0: leave root
         assert_eq!(
             state.common.current_dir,
-            root.parent().unwrap().canonicalize().unwrap()
+            dunce::canonicalize(root.parent().unwrap()).unwrap()
         );
     }
 
@@ -916,7 +914,10 @@ mod tests {
         state.descend();
         assert!(state.common.current_dir.ends_with("a_dir"));
         state.ascend();
-        assert_eq!(state.common.current_dir, root.canonicalize().unwrap());
+        assert_eq!(
+            state.common.current_dir,
+            dunce::canonicalize(&root).unwrap()
+        );
     }
 
     #[cfg(unix)]
@@ -993,7 +994,7 @@ mod tests {
 
     #[test]
     fn builder_canonicalizes_relative_start_dir() {
-        let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let cwd = dunce::canonicalize(std::env::current_dir().unwrap()).unwrap();
         let mut state = FilePickerState::builder().start_dir(".").build();
 
         assert_eq!(state.common.current_dir, cwd);
@@ -1012,15 +1013,42 @@ mod tests {
         let home = dirs::home_dir().unwrap();
 
         let state = FilePickerState::builder().start_dir("~").build();
-        assert_eq!(state.common.current_dir, home.canonicalize().unwrap());
+        assert_eq!(
+            state.common.current_dir,
+            dunce::canonicalize(&home).unwrap()
+        );
 
-        // "~/" prefix is expanded; a nonexistent target keeps the expanded path. Compared against the uncanonicalized home on purpose: canonicalizing is what adds Windows' `\\?\` verbatim prefix, and a path that does not exist never reaches that step.
+        // "~/" prefix is expanded; a nonexistent target keeps the expanded path, so it is compared against the plain home rather than a canonicalized one.
         let state = FilePickerState::builder()
             .start_dir("~/ratatree-nonexistent-dir")
             .build();
         assert_eq!(
             state.common.current_dir,
             home.join("ratatree-nonexistent-dir")
+        );
+    }
+
+    /// std's canonicalize yields `\\?\C:\...` on Windows. That prefix must not leak into current_dir, because every entry path and every returned path is derived from it.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_carry_no_verbatim_prefix() {
+        fn is_verbatim(path: &Path) -> bool {
+            path.to_string_lossy().starts_with(r"\\?\")
+        }
+        let dir = make_dir_with_files();
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
+        assert!(
+            !is_verbatim(&state.common.current_dir),
+            "start_dir: {:?}",
+            state.common.current_dir
+        );
+
+        state.enter_directory(); // subdir sorts first
+        assert!(state.common.current_dir.ends_with("subdir"));
+        assert!(
+            !is_verbatim(&state.common.current_dir),
+            "enter_directory: {:?}",
+            state.common.current_dir
         );
     }
 

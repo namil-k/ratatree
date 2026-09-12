@@ -20,6 +20,8 @@ exclude = ["docs/", ".superpowers/", ".github/", ".git-blame-ignore-revs"]
 # in `handle_event` incompatible with the one the application constructs.
 ratatui = { version = "0.30", features = ["crossterm"] }
 dirs = "7"
+# std's canonicalize returns `\\?\C:\...` verbatim paths on Windows. Those end up in current_dir, in every entry path derived from it, and in the paths handed back through PickerResult, where they look wrong and trip tools that do not accept the prefix. dunce strips it whenever the path is short enough to work without it.
+dunce = "1"
 
 [dev-dependencies]
 tempfile = "3"
