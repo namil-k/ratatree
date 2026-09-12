@@ -27,6 +27,8 @@ pub enum PickerMode {
     /// Only files may be picked. `Enter` on a directory enters it instead of returning it.
     FilesOnly,
     /// Only directories may be picked. `Enter` on a file does nothing.
+    ///
+    /// The listing starts with a `.` entry standing for the directory being browsed, so that directory can be picked itself, even when it is empty. `Enter` on it confirms; it cannot be entered or expanded.
     DirsOnly,
     /// Files and directories may both be picked.
     Both,
@@ -80,7 +82,7 @@ pub enum InputMode {
 pub struct CommonState {
     /// The directory being listed. Canonicalized by [`FilePickerBuilder::build`] and kept canonical thereafter.
     pub current_dir: PathBuf,
-    /// The rows to draw. In list view these are the entries of [`current_dir`](Self::current_dir); in tree view they are that directory plus every expanded descendant, flattened in display order.
+    /// The rows to draw. In list view these are the entries of [`current_dir`](Self::current_dir); in tree view they are that directory plus every expanded descendant, flattened in display order. In [`PickerMode::DirsOnly`] the first entry is `.`, whose `path` is `current_dir` itself.
     pub entries: Vec<Entry>,
     /// Indices into [`entries`](Self::entries) matching the search query, or `None` when no search is active.
     pub filtered_indices: Option<Vec<usize>>,
@@ -235,8 +237,11 @@ impl FilePickerState {
             ViewState::Tree(tree) => tree.build_tree_entries(&dir, show_hidden, filter),
         };
         self.common.entries = match read {
-            Ok(entries) => {
+            Ok(mut entries) => {
                 self.common.read_error = None;
+                if self.common.mode == PickerMode::DirsOnly {
+                    entries.insert(0, current_dir_entry(&dir));
+                }
                 entries
             }
             Err(err) => {
@@ -722,11 +727,14 @@ impl FilePickerBuilder {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
         let current_dir = resolve_start_dir(start_dir);
 
-        let (entries, read_error) =
+        let (mut entries, read_error) =
             match read_entries(&current_dir, self.show_hidden, self.filter.as_deref()) {
                 Ok(entries) => (entries, None),
                 Err(err) => (Vec::new(), Some(read_failure_message(&err))),
             };
+        if read_error.is_none() && self.mode == PickerMode::DirsOnly {
+            entries.insert(0, current_dir_entry(&current_dir));
+        }
 
         let view = match self.view_mode {
             ViewMode::List => ViewState::List(ListViewState::new()),
@@ -752,6 +760,17 @@ impl FilePickerBuilder {
         };
 
         FilePickerState { common, view }
+    }
+}
+
+/// The `.` entry that heads a `DirsOnly` listing so the directory being browsed can itself be picked, including when it is empty.
+fn current_dir_entry(current_dir: &Path) -> Entry {
+    Entry {
+        name: ".".to_string(),
+        path: current_dir.to_path_buf(),
+        kind: EntryKind::Directory,
+        is_hidden: false,
+        depth: 0,
     }
 }
 
@@ -1151,6 +1170,119 @@ mod tests {
     }
 
     #[test]
+    fn dirs_only_lists_the_current_directory_first() {
+        let dir = make_dir_with_files();
+        let state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .mode(PickerMode::DirsOnly)
+            .build();
+
+        let first = &state.common.entries[0];
+        assert_eq!(first.name, ".");
+        assert_eq!(first.path, state.common.current_dir);
+        assert_eq!(first.kind, EntryKind::Directory);
+        assert_eq!(first.depth, 0);
+        assert_eq!(
+            state.common.entries.len(),
+            4,
+            "subdir, alpha.txt, beta.rs plus the dot entry"
+        );
+    }
+
+    #[test]
+    fn other_modes_do_not_list_the_current_directory() {
+        let dir = make_dir_with_files();
+        for mode in [PickerMode::FilesOnly, PickerMode::Both] {
+            let state = FilePickerState::builder()
+                .start_dir(dir.path())
+                .mode(mode)
+                .build();
+            assert_ne!(state.common.entries[0].name, ".", "{mode:?}");
+            assert_eq!(state.common.entries.len(), 3, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn dirs_only_lists_the_current_directory_even_when_empty() {
+        let dir = TempDir::new().unwrap();
+        let state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .mode(PickerMode::DirsOnly)
+            .build();
+
+        assert_eq!(state.common.entries.len(), 1);
+        assert_eq!(state.common.entries[0].name, ".");
+    }
+
+    #[test]
+    fn dirs_only_has_no_current_directory_entry_when_the_read_fails() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("no-such-directory");
+        let state = FilePickerState::builder()
+            .start_dir(&missing)
+            .mode(PickerMode::DirsOnly)
+            .build();
+
+        assert!(
+            state.common.entries.is_empty(),
+            "a directory that cannot be read must not be offered for picking"
+        );
+        assert!(state.common.read_error.is_some());
+    }
+
+    #[test]
+    fn dirs_only_keeps_exactly_one_current_directory_entry_after_refresh() {
+        let dir = make_dir_with_files();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .mode(PickerMode::DirsOnly)
+            .build();
+
+        state.toggle_hidden(); // goes through refresh_entries
+        state.refresh_entries();
+
+        let dots = state
+            .common
+            .entries
+            .iter()
+            .filter(|e| e.name == ".")
+            .count();
+        assert_eq!(dots, 1);
+        assert_eq!(state.common.entries[0].name, ".");
+    }
+
+    #[test]
+    fn tree_view_lists_the_current_directory_once_at_the_root() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = FilePickerState::builder()
+            .start_dir(&root)
+            .mode(PickerMode::DirsOnly)
+            .view(ViewMode::Tree)
+            .build();
+        assert_eq!(state.common.entries[0].name, ".");
+
+        *state.view.cursor_mut() = 1; // a_dir
+        state.expand_current();
+
+        let dots: Vec<&Entry> = state
+            .common
+            .entries
+            .iter()
+            .filter(|e| e.name == ".")
+            .collect();
+        assert_eq!(
+            dots.len(),
+            1,
+            "expanded subdirectories must not get their own dot entry"
+        );
+        assert_eq!(dots[0].depth, 0);
+        assert!(
+            state.common.entries.iter().any(|e| e.name == "inner.txt"),
+            "a_dir was expanded"
+        );
+    }
+
+    #[test]
     fn builder_with_tree_view() {
         let dir = make_dir_with_files();
         let state = FilePickerState::builder()
@@ -1215,6 +1347,7 @@ mod tests {
             .mode(PickerMode::DirsOnly)
             .build();
 
+        *state.view.cursor_mut() = 1; // past the `.` entry
         assert_eq!(state.current_entry().unwrap().kind, EntryKind::File);
         state.confirm();
         assert_eq!(state.result(), PickerResult::Pending);
