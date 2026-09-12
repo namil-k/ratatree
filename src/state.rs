@@ -1417,6 +1417,23 @@ mod tests {
     }
 
     #[test]
+    fn going_up_puts_the_cursor_on_the_parents_current_directory_entry() {
+        let dir = make_dir_with_files();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path().join("subdir"))
+            .mode(PickerMode::DirsOnly)
+            .build();
+
+        state.go_parent();
+
+        assert_eq!(
+            state.common.current_dir,
+            dunce::canonicalize(dir.path()).unwrap()
+        );
+        assert_eq!(state.current_entry().unwrap().name, ".");
+    }
+
+    #[test]
     fn builder_with_tree_view() {
         let dir = make_dir_with_files();
         let state = FilePickerState::builder()

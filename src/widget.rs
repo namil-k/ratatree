@@ -74,6 +74,7 @@ fn truncate_path_left(path: &str, width: usize) -> String {
         return path.to_string();
     }
     const ELLIPSIS: &str = "…";
+    // A zero-width bar gets the ellipsis too; the caller's area clips it, and special-casing 0 would only add a branch.
     if width <= 1 {
         return ELLIPSIS.to_string();
     }
@@ -303,6 +304,17 @@ mod tests {
         let got = truncate_path_left(&path, 10);
         assert_eq!(got, format!("…{sep}프로젝트"));
         assert_eq!(Span::raw(&got).width(), 10);
+    }
+
+    #[test]
+    fn drive_prefix_is_dropped_like_any_other_component() {
+        // On Windows the first component is `C:`; the same shape is used everywhere so the test is not platform-gated.
+        let sep = std::path::MAIN_SEPARATOR;
+        let path = ["C:", "Users", "namilkim", "Documents"].join(&sep.to_string());
+        assert_eq!(
+            truncate_path_left(&path, 20),
+            format!("…{sep}namilkim{sep}Documents")
+        );
     }
 
     #[test]
