@@ -150,7 +150,12 @@ impl std::fmt::Debug for CommonState {
 ///
 /// To use a different key map, ignore [`handle_event`](Self::handle_event) and call the movement and action methods directly.
 ///
-/// Like [`CommonState`] this is `#[non_exhaustive]`: build one with the builder, not a struct literal.
+/// Like [`CommonState`] this is `#[non_exhaustive]`: build one with the builder, not a struct literal, and destructure it with `..` so a future field does not break the pattern.
+///
+/// ```compile_fail
+/// let state = ratatree::FilePickerState::builder().build();
+/// let ratatree::FilePickerState { common, view } = state;
+/// ```
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct FilePickerState {
@@ -453,7 +458,7 @@ impl FilePickerState {
 
     /// Puts a finished picker back to [`PickerResult::Pending`] so it can be shown again.
     ///
-    /// Clears the selection, any search, the pending key prefix and the error message. The current directory, cursor, scroll and tree expansion are kept, so the user resumes where they left off. Nothing is re-read from disk; call [`refresh_entries`](Self::refresh_entries) for that.
+    /// Clears the selection, the search query and filter, the pending key prefix and the error message, and returns to [`InputMode::Normal`] if the picker was in search mode. The current directory, cursor, scroll and tree expansion are kept, so the user resumes where they left off. Nothing is re-read from disk; call [`refresh_entries`](Self::refresh_entries) for that.
     pub fn reset(&mut self) {
         // The cursor indexes the filtered list while a search is active, so it has to be re-found by path once the filter is gone.
         let keep = self.current_entry().map(|e| e.path.clone());
@@ -750,12 +755,12 @@ impl FilePickerBuilder {
     }
 }
 
-/// Expands a leading `~` to the home directory and resolves the result to an absolute path with symlinks removed. A path that does not exist is kept as is, after tilde expansion, so the picker can still show it in the path bar.
 /// Turns a failed directory read into something short enough for the status bar.
 fn read_failure_message(err: &std::io::Error) -> String {
     format!("Cannot read directory: {}", err.kind())
 }
 
+/// Expands a leading `~` to the home directory and resolves the result to an absolute path with symlinks removed. A path that does not exist is kept as is, after tilde expansion, so the picker can still show it in the path bar.
 fn resolve_start_dir(dir: PathBuf) -> PathBuf {
     let expanded = expand_tilde(dir);
     dunce::canonicalize(&expanded).unwrap_or(expanded)
