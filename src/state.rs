@@ -433,6 +433,25 @@ impl FilePickerState {
         self.common.result = PickerResult::Cancelled;
     }
 
+    /// Puts a finished picker back to [`PickerResult::Pending`] so it can be shown again.
+    ///
+    /// Clears the selection, any search, the pending key prefix and the error message. The current directory, cursor, scroll and tree expansion are kept, so the user resumes where they left off. Nothing is re-read from disk; call [`refresh_entries`](Self::refresh_entries) for that.
+    pub fn reset(&mut self) {
+        // The cursor indexes the filtered list while a search is active, so it has to be re-found by path once the filter is gone.
+        let keep = self.current_entry().map(|e| e.path.clone());
+        self.common.result = PickerResult::Pending;
+        self.common.selected.clear();
+        self.common.input_mode = InputMode::Normal;
+        self.common.search_query.clear();
+        self.common.filtered_indices = None;
+        self.common.pending_key = None;
+        self.common.error_message = None;
+        let kept = keep.map(|p| self.move_cursor_to_path(&p)).unwrap_or(false);
+        if !kept {
+            self.clamp_cursor();
+        }
+    }
+
     // --- Directory navigation ---
 
     /// Makes the directory under the cursor the new current directory, resetting the cursor and scroll.

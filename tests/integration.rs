@@ -425,3 +425,69 @@ fn state_is_debug() {
     assert!(dump.starts_with("FilePickerState"), "got {dump}");
     assert!(dump.contains("current_dir"), "got {dump}");
 }
+
+/// Once the picker has a result it ignores every event. `reset` puts it back to `Pending` so the same state can be shown again.
+#[test]
+fn reset_makes_picker_accept_events_again() {
+    let tmp = setup_test_dir();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
+
+    state.handle_event(key(KeyCode::Down));
+    state.handle_event(key(KeyCode::Down));
+    state.handle_event(key(KeyCode::Enter));
+    assert!(matches!(state.result(), PickerResult::Selected(_)));
+
+    state.handle_event(key(KeyCode::Down));
+    assert_eq!(state.view.cursor(), 2, "a finished picker ignores keys");
+
+    state.reset();
+
+    assert_eq!(state.result(), PickerResult::Pending);
+    state.handle_event(key(KeyCode::Down));
+    assert_eq!(state.view.cursor(), 3, "after reset keys are handled again");
+}
+
+/// `reset` drops the selection and any search so the next use starts clean.
+#[test]
+fn reset_clears_selection_and_search() {
+    let tmp = setup_test_dir();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
+
+    state.handle_event(key_char(' '));
+    state.handle_event(key_char('/'));
+    state.handle_event(key_char('C'));
+    state.common.error_message = Some("Circular symlink".to_string());
+    assert_eq!(state.common.selected.len(), 1);
+    assert_eq!(state.common.input_mode, ratatree::InputMode::Search);
+    assert!(state.common.filtered_indices.is_some());
+
+    state.reset();
+
+    assert!(state.common.selected.is_empty());
+    assert_eq!(state.common.input_mode, ratatree::InputMode::Normal);
+    assert_eq!(state.common.search_query, "");
+    assert_eq!(state.common.filtered_indices, None);
+    assert_eq!(state.common.error_message, None);
+    assert_eq!(state.common.pending_key, None);
+}
+
+/// Dropping the search filter changes what the cursor index means, so `reset` re-finds the entry by path. The directory is not touched.
+#[test]
+fn reset_keeps_directory_and_cursor_entry() {
+    let tmp = setup_test_dir();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
+    let dir_before = state.common.current_dir.clone();
+
+    state.handle_event(key_char('/'));
+    state.handle_event(key_char('C'));
+    state.handle_event(key_char('a'));
+    state.handle_event(key_char('r'));
+    assert_eq!(state.current_entry().unwrap().name, "Cargo.toml");
+    assert_eq!(state.view.cursor(), 0, "index into the filtered list");
+
+    state.reset();
+
+    assert_eq!(state.common.current_dir, dir_before);
+    assert_eq!(state.current_entry().unwrap().name, "Cargo.toml");
+    assert_eq!(state.view.cursor(), 2, "index into the full list");
+}
