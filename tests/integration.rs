@@ -401,3 +401,15 @@ fn symlink_cycle_detection() {
         "symlink to an unrelated directory should be followed"
     );
 }
+
+/// `clamp_cursor` is public so a custom key map can pull the cursor back into range after it changes the entry list itself.
+#[test]
+fn clamp_cursor_is_public_and_pulls_cursor_into_range() {
+    let tmp = setup_test_dir();
+    let mut state = FilePickerState::builder().start_dir(tmp.path()).build();
+
+    *state.view.cursor_mut() = 100;
+    state.clamp_cursor();
+
+    assert_eq!(state.view.cursor(), state.visible_count() - 1);
+}

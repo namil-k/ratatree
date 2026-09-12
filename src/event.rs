@@ -107,7 +107,7 @@ fn handle_search_key(state: &mut FilePickerState, key: KeyEvent) {
             state.common.input_mode = InputMode::Normal;
             state.common.search_query.clear();
             state.common.filtered_indices = None;
-            state.clamp_cursor_pub();
+            state.clamp_cursor();
         }
         KeyCode::Enter => {
             // Keep filter active, just return to Normal mode

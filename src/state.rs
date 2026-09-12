@@ -571,7 +571,10 @@ impl FilePickerState {
 
     // --- Cursor clamping ---
 
-    fn clamp_cursor(&mut self) {
+    /// Pulls the cursor back into range after the visible entries changed underneath it.
+    ///
+    /// The navigation methods call this themselves. It is public for applications that edit [`CommonState::entries`] or [`CommonState::filtered_indices`] directly.
+    pub fn clamp_cursor(&mut self) {
         let count = self.visible_count();
         let cursor = self.view.cursor_mut();
         if count == 0 {
@@ -579,11 +582,6 @@ impl FilePickerState {
         } else if *cursor >= count {
             *cursor = count - 1;
         }
-    }
-
-    /// Pulls the cursor back into range after the visible entries changed underneath it.
-    pub fn clamp_cursor_pub(&mut self) {
-        self.clamp_cursor();
     }
 
     // --- Event handling ---
