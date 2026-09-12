@@ -138,6 +138,7 @@ impl std::fmt::Debug for CommonState {
 /// ```
 ///
 /// To use a different key map, ignore [`handle_event`](Self::handle_event) and call the movement and action methods directly.
+#[derive(Debug)]
 pub struct FilePickerState {
     /// State shared by both views.
     pub common: CommonState,

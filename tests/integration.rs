@@ -413,3 +413,15 @@ fn clamp_cursor_is_public_and_pulls_cursor_into_range() {
 
     assert_eq!(state.view.cursor(), state.visible_count() - 1);
 }
+
+/// `FilePickerState` is `Debug` so an application can log it or hold it inside its own `#[derive(Debug)]` state.
+#[test]
+fn state_is_debug() {
+    let tmp = setup_test_dir();
+    let state = FilePickerState::builder().start_dir(tmp.path()).build();
+
+    let dump = format!("{:?}", state);
+
+    assert!(dump.starts_with("FilePickerState"), "got {dump}");
+    assert!(dump.contains("current_dir"), "got {dump}");
+}
