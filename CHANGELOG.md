@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - unreleased
+
+The three dialogs an application usually needs, open a file, choose a folder and pick several files, now work without help in a narrow panel, a long path, a large directory and an empty folder.
+
+### Migration
+
+- In `PickerMode::DirsOnly` the first entry of `CommonState::entries` is now `.`, whose `path` is `current_dir`. Code that iterates `entries` or indexes `entries[0]` in that mode sees it. `FilesOnly` and `Both` are unchanged.
+- `PickerResult::Selected` can now return `current_dir` itself in `DirsOnly` mode.
+
+### Added
+
+- `.` entry in `DirsOnly` mode. A choose-folder dialog had no way to pick the folder the user had navigated into, and an empty folder could not be picked at all. `Enter` or `Space` on `.` picks the current directory; it cannot be entered or expanded.
+- Cursor position in the status bar: `3/340 | 0 selected | ...`. A home directory with a few hundred entries gave no sense of where the cursor was.
+- `examples/dialogs.rs`: the three dialogs as 50x18 modals over a host screen.
+
+### Changed
+
+- The path bar truncates from the left. A 50-column panel showing a home directory path used to lose the one component that matters, the directory the user is in. It now reads `…/Application Support/app`.
+
 ## [0.3.0] - 2026-09-12
 
 Reusable state, a read failure that stays on screen, clean paths on Windows, and two renames that make the next field addition a non-breaking change.

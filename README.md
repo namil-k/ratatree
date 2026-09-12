@@ -28,7 +28,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ratatree = "0.3"
+ratatree = "0.4"
 ratatui = "0.30"
 ```
 
@@ -77,6 +77,7 @@ loop {
 - **Vim keybindings** - `hjkl`, `gg`, `G`, `Ctrl+D/U` (arrow keys too)
 - **Fuzzy search** - press `/` and start typing; results rank by how well they match, not by directory order
 - **Multi-select** - `Space` to toggle, `Enter` to confirm
+- **Choose-folder dialogs** - in `DirsOnly` mode the listing starts with `.`, so the folder being browsed can be picked itself, even when it is empty
 - **Hidden files** - toggle with `.`
 - **Symlink support** - follows symlinks with circular reference detection
 - **Filter callback** - show only the files you want
@@ -119,7 +120,7 @@ let mut state = FilePickerState::builder()
 
 | Key | Action |
 |---|---|
-| `Enter` | Confirm selection (or enter directory; tree view: expand/collapse it) |
+| `Enter` | Confirm selection (or enter directory; tree view: expand/collapse it). On the `.` entry in `DirsOnly` mode, confirm the current directory |
 | `Space` | Toggle multi-select on current item |
 | `Esc` / `q` | Cancel |
 | `Tab` | Switch between List and Tree view |
