@@ -9,15 +9,15 @@ A file and directory picker widget for [ratatui](https://github.com/ratatui/rata
 Drop it into any ratatui app. Your users get a full-featured file browser with keyboard navigation, fuzzy search, multi-select, and two view modes - all from a single widget.
 
 ```
-┌─────────────────────────────────────────┐
-│/home/you/projects/ratatree              │
-│   src/                                  │
-│   tests/                                │
-│ * Cargo.toml                            │
-│   config ->                             │
-│                                         │
-│1 selected | hidden: off | view: list    │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│/home/you/projects/ratatree                  │
+│   src/                                      │
+│   tests/                                    │
+│ * Cargo.toml                                │
+│   config ->                                 │
+│                                             │
+│3/4 | 1 selected | hidden: off | view: list  │
+└─────────────────────────────────────────────┘
 ```
 
 The cursor row is drawn with the cursor style (a background highlight), not a marker character. Multi-selected rows are prefixed with `*`, directories get a trailing `/`, and symlinks a trailing `->`. The example above is drawn inside a `Block` you supply with `FilePicker::default().block(...)`; without one the widget uses the whole area and draws no border.
@@ -138,19 +138,19 @@ let mut state = FilePickerState::builder()
 ### Tree View
 
 ```
-┌─────────────────────────────────────────┐
-│/home/you/projects/ratatree              │
-│   ▾ src/                                │
-│     ▾ view/                             │
-│         list.rs                         │
-│         mod.rs                          │
-│       entry.rs                          │
-│       state.rs                          │
-│   ▸ tests/                              │
-│     Cargo.toml                          │
-│     config ->                           │
-│0 selected | hidden: off | view: tree    │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│/home/you/projects/ratatree                  │
+│   ▾ src/                                    │
+│     ▾ view/                                 │
+│         list.rs                             │
+│         mod.rs                              │
+│       entry.rs                              │
+│       state.rs                              │
+│   ▸ tests/                                  │
+│     Cargo.toml                              │
+│     config ->                               │
+│1/9 | 0 selected | hidden: off | view: tree  │
+└─────────────────────────────────────────────┘
 ```
 
 Press `Tab` to switch to the tree view. Directories expand in place instead of replacing the listing, and the cursor keeps working on the flattened tree, so search, multi-select and mouse clicks behave the same as in list view.

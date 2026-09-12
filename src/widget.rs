@@ -228,9 +228,15 @@ fn render_status_bar(area: Rect, buf: &mut Buffer, state: &FilePickerState) {
                 ViewState::List(_) => "list",
                 ViewState::Tree(_) => "tree",
             };
+            let count = state.visible_count();
+            let position = if count == 0 {
+                0
+            } else {
+                state.view.cursor() + 1
+            };
             let text = format!(
-                "{} selected | hidden: {} | view: {}",
-                selected_count, hidden_str, view_str
+                "{}/{} | {} selected | hidden: {} | view: {}",
+                position, count, selected_count, hidden_str, view_str
             );
             let para = Paragraph::new(Line::from(Span::styled(text, theme.status_bar)));
             para.render(area, buf);
@@ -325,6 +331,50 @@ mod tests {
         let bar = row_text(&terminal, 0);
         assert!(bar.starts_with('…'), "got {bar:?}");
         assert!(bar.ends_with("target"), "got {bar:?}");
+    }
+
+    #[test]
+    fn status_bar_starts_with_the_cursor_position() {
+        let dir = make_dir_with_n_files(5);
+        let mut state = FilePickerState::builder().start_dir(dir.path()).build();
+        *state.view.cursor_mut() = 2;
+
+        let backend = TestBackend::new(60, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+            })
+            .unwrap();
+
+        assert_eq!(
+            row_text(&terminal, 7),
+            "3/5 | 0 selected | hidden: off | view: list"
+        );
+    }
+
+    #[test]
+    fn status_bar_shows_zero_of_zero_for_an_empty_listing() {
+        use crate::state::PickerMode;
+        let dir = TempDir::new().unwrap();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .mode(PickerMode::FilesOnly)
+            .build();
+
+        let backend = TestBackend::new(60, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_stateful_widget(FilePicker::default(), frame.area(), &mut state);
+            })
+            .unwrap();
+
+        assert!(
+            row_text(&terminal, 3).starts_with("0/0 | "),
+            "got {:?}",
+            row_text(&terminal, 3)
+        );
     }
 
     #[test]
