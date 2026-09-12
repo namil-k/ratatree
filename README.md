@@ -236,10 +236,11 @@ impl App {
 
 Dropping the state is the simplest option. To reopen the picker where the user left it, keep the state and call `reset()` instead: it puts the result back to `Pending` and clears the selection and search while keeping the current directory and cursor.
 
-## Running the Example
+## Running the Examples
 
 ```bash
-cargo run --example basic
+cargo run --example basic     # the picker filling the whole terminal
+cargo run --example dialogs   # open-file, choose-folder and pick-files modals over a host screen
 ```
 
 ## Changelog
