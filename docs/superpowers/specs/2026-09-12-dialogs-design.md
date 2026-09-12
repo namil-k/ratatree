@@ -71,7 +71,7 @@ ratatree의 직접 사용자는 ratatui 앱에 파일/폴더 선택 화면이 �
 
 ### 동작
 
-- 경로의 표시 폭(`unicode_width::UnicodeWidthStr`, `ratatui`가 재수출)이 영역 폭 이하이면 그대로 그린다.
+- 경로의 표시 폭이 영역 폭 이하이면 그대로 그린다. 폭은 `ratatui::text::Span::raw(s).width()`로 잰다. ratatui가 `unicode-width`를 내부에서 쓰지만 재수출하지는 않으므로, `Span::width`를 통해 같은 계산을 얻고 새 의존성은 넣지 않는다.
 - 초과하면 앞쪽 컴포넌트를 하나씩 떼면서 `…` + 구분자 + 남은 컴포넌트들(구분자로 연결)이 폭에 들어갈 때까지 줄인다. 구분자는 `std::path::MAIN_SEPARATOR`다. 루트(`/`)와 Windows 접두(`C:`)도 떼어지는 컴포넌트다. 예: `/Users/namilkim/Library/Application Support/app` → `…/Application Support/app`.
 - 마지막 컴포넌트 하나만 남아도 안 들어가면 그 컴포넌트를 앞에서 문자 단위로 잘라 `…` 뒤에 붙인다.
 - 폭이 1 이하이면 `…`만 그린다.
