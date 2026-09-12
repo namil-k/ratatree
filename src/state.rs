@@ -288,6 +288,10 @@ impl FilePickerState {
         if entry.kind != EntryKind::Directory {
             return;
         }
+        // Expanding the `.` entry would list the current directory inside itself.
+        if entry.path == self.common.current_dir {
+            return;
+        }
         let path = entry.path.clone();
         let ViewState::Tree(tree) = &mut self.view else {
             return;
@@ -441,6 +445,13 @@ impl FilePickerState {
         }
 
         match self.current_entry() {
+            // The `.` entry stands for the directory being browsed: it is picked, never entered.
+            Some(entry)
+                if entry.kind == EntryKind::Directory && entry.path == self.common.current_dir =>
+            {
+                let path = entry.path.clone();
+                self.common.result = PickerResult::Selected(vec![path]);
+            }
             Some(entry) if entry.kind == EntryKind::Directory => {
                 if matches!(self.view, ViewState::Tree(_)) {
                     self.toggle_expand_current();
@@ -492,6 +503,10 @@ impl FilePickerState {
         };
 
         if entry.kind == EntryKind::File {
+            return;
+        }
+        // The `.` entry already is the current directory.
+        if entry.path == self.common.current_dir {
             return;
         }
         let is_symlink = entry.kind == EntryKind::Symlink;
@@ -1280,6 +1295,125 @@ mod tests {
             state.common.entries.iter().any(|e| e.name == "inner.txt"),
             "a_dir was expanded"
         );
+    }
+
+    #[test]
+    fn confirming_the_current_directory_entry_returns_the_current_directory() {
+        let dir = make_dir_with_files();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .mode(PickerMode::DirsOnly)
+            .build();
+        assert_eq!(state.current_entry().unwrap().name, ".");
+
+        state.confirm();
+
+        assert_eq!(
+            state.result(),
+            PickerResult::Selected(vec![state.common.current_dir.clone()])
+        );
+    }
+
+    #[test]
+    fn confirming_the_current_directory_entry_works_in_an_empty_directory() {
+        let dir = TempDir::new().unwrap();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .mode(PickerMode::DirsOnly)
+            .build();
+
+        state.confirm();
+
+        assert_eq!(
+            state.result(),
+            PickerResult::Selected(vec![state.common.current_dir.clone()])
+        );
+    }
+
+    #[test]
+    fn the_current_directory_entry_can_be_multi_selected_across_directories() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = FilePickerState::builder()
+            .start_dir(&root)
+            .mode(PickerMode::DirsOnly)
+            .build();
+
+        state.toggle_select(); // "." in root
+        *state.view.cursor_mut() = 1; // a_dir
+        state.enter_directory();
+        assert_eq!(state.current_entry().unwrap().name, ".");
+        state.toggle_select(); // "." in a_dir
+        state.confirm();
+
+        assert_eq!(
+            state.result(),
+            PickerResult::Selected(vec![root.clone(), root.join("a_dir")])
+        );
+    }
+
+    #[test]
+    fn the_current_directory_entry_cannot_be_entered() {
+        let dir = make_dir_with_files();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .mode(PickerMode::DirsOnly)
+            .build();
+        let before = state.common.current_dir.clone();
+        let count = state.common.entries.len();
+        // Entering a directory resets the scroll offset; a real no-op leaves it alone.
+        *state.view.scroll_offset_mut() = 1;
+
+        state.enter_directory();
+        state.descend();
+
+        assert_eq!(state.common.current_dir, before);
+        assert_eq!(state.common.entries.len(), count);
+        assert_eq!(state.current_entry().unwrap().name, ".");
+        assert_eq!(
+            state.view.scroll_offset(),
+            1,
+            "enter_directory must not run at all on ."
+        );
+    }
+
+    #[test]
+    fn the_current_directory_entry_cannot_be_expanded() {
+        let (_tmp, root) = make_tree_dir();
+        let mut state = FilePickerState::builder()
+            .start_dir(&root)
+            .mode(PickerMode::DirsOnly)
+            .view(ViewMode::Tree)
+            .build();
+        let count = state.common.entries.len();
+
+        state.expand_current();
+        state.toggle_expand_current();
+        state.descend();
+
+        assert_eq!(
+            state.common.entries.len(),
+            count,
+            "expanding . would list the root twice"
+        );
+        let ViewState::Tree(tree) = &state.view else {
+            panic!("tree view expected");
+        };
+        assert!(!tree.is_expanded(&state.common.current_dir));
+    }
+
+    #[test]
+    fn entering_a_directory_puts_the_cursor_on_its_current_directory_entry() {
+        let dir = make_dir_with_files();
+        let mut state = FilePickerState::builder()
+            .start_dir(dir.path())
+            .mode(PickerMode::DirsOnly)
+            .build();
+        *state.view.cursor_mut() = 1; // subdir
+
+        state.enter_directory();
+
+        assert!(state.common.current_dir.ends_with("subdir"));
+        assert_eq!(state.current_entry().unwrap().name, ".");
     }
 
     #[test]

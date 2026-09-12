@@ -491,3 +491,28 @@ fn reset_keeps_directory_and_cursor_entry() {
     assert_eq!(state.current_entry().unwrap().name, "Cargo.toml");
     assert_eq!(state.view.cursor(), 2, "index into the full list");
 }
+
+/// Choose-folder dialog: walk into a folder, then Enter on `.` returns that folder.
+#[test]
+fn choose_folder_returns_the_directory_the_user_walked_into() {
+    let tmp = setup_test_dir();
+    let mut state = FilePickerState::builder()
+        .start_dir(tmp.path())
+        .mode(PickerMode::DirsOnly)
+        .build();
+
+    // Entries: ., src/, tests/, Cargo.toml, README.md
+    state.handle_event(key(KeyCode::Down));
+    assert_eq!(state.current_entry().unwrap().name, "src");
+    state.handle_event(key(KeyCode::Enter)); // enter src/
+    assert_eq!(state.current_entry().unwrap().name, ".");
+    state.handle_event(key(KeyCode::Enter)); // pick "."
+
+    match state.result() {
+        PickerResult::Selected(paths) => {
+            assert_eq!(paths.len(), 1);
+            assert!(paths[0].ends_with("src"), "got {:?}", paths[0]);
+        }
+        other => panic!("expected Selected, got {:?}", other),
+    }
+}
